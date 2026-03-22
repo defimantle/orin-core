@@ -9,8 +9,8 @@
     "deploy_local": "anchor build && anchor deploy --provider.cluster localnet",
     "start": "cd backend && ts-node src/listener.ts",
     "simulate": "cd backend && ts-node src/simulate_frontend.ts",
-    "start_devnet": "cd backend && export RPC_ENDPOINT=https://api.devnet.solana.com && ts-node src/listener.ts",
-    "simulate_devnet": "cd backend && export RPC_ENDPOINT=https://api.devnet.solana.com && ts-node src/simulate_frontend.ts"
+    "start_devnet": "cd backend && export NETWORK=Devnet && ts-node src/listener.ts",
+    "simulate_devnet": "cd backend && export NETWORK=Devnet && ts-node src/simulate_frontend.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1"
