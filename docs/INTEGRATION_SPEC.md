@@ -49,7 +49,7 @@ export function getGuestAddress(email: string): PublicKey {
 
 ## 2. Core Data Structures (TypeScript Types)
 
-Our smart contract stores the core metadata, while the detailed environmental context (`preferences`) is inherently dynamic and stringified on-chain.
+Our smart contract utilizes a **Privacy-First Hybrid Architecture**. Instead of storing sensitive metadata like `preferences` on a public ledger, we store only a 32-byte cryptographic Verification Hash on-chain. The actual JSON data flows through a secure off-chain side-channel.
 
 Here is the exact TypeScript type mapping you should use for your state management and UI scaffolding:
 
@@ -75,7 +75,7 @@ export interface GuestProfile {
   name: string;            // Max 100 bytes
   loyaltyPoints: number;   // u64 casted to number
   stayCount: number;       // u32
-  preferences: string;     // Raw JSON string of RoomPreferences
+  preferencesHash: number[]; // 32-byte array: SHA-256 hash of the off-chain RoomPreferences
 }
 
 /**
@@ -133,7 +133,10 @@ export function useGuestRealtimeState(guestPda: string) {
 
 **📝 Next Steps for Frontend:**
 1. Implement the UI using the `RoomPreferences` interface.
-2. Form your Solana transactions using `@coral-xyz/anchor`. The instruction to call is `updatePreferences(JSON.stringify(newRoomPreferences))`.
+2. **Hybrid State Mutation**: To update preferences in a privacy-preserving way:
+   - **Step A:** Send the raw JSON string to our backend HTTP Gateway (`POST /api/preferences`).
+   - **Step B:** Compute the precise SHA-256 hash of the exact JSON payload array on the client side.
+   - **Step C:** Form your Solana transaction using `@coral-xyz/anchor`. Call `updatePreferences(Array.from(hash))` to lock the verified state on the blockchain.
 3. Read the state updates via the `useGuestRealtimeState` hook to reflect UI changes instantly.
 
 Feel free to ping the Backend team if you need any adjustments to the payload shapes!

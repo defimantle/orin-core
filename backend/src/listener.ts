@@ -74,10 +74,15 @@ export function startSolanaListener() {
             
             let onChainHashHex = "";
             try {
-                const decoded = coder.accounts.decode("GuestIdentity", updatedAccountInfo.accountInfo.data);
-                // Extract the 32-byte preferencesHash stored on-chain
-                if (decoded.preferencesHash) {
-                    onChainHashHex = Buffer.from(decoded.preferencesHash).toString('hex');
+                const decoded: any = coder.accounts.decode("GuestIdentity", updatedAccountInfo.accountInfo.data);
+                
+                // Depending on the Anchor version, coder might return snake_case or camelCase directly from IDL definitions.
+                const hashRaw = decoded.preferencesHash || decoded.preferences_hash;
+                
+                if (hashRaw) {
+                    onChainHashHex = Buffer.from(hashRaw).toString('hex');
+                } else {
+                    console.error("[ORIN-Backend] ❌ Debug: Could not find hash field in decoded object. Keys found:", Object.keys(decoded));
                 }
             } catch (err) {
                 console.error("[ORIN-Backend] ❌ Failed to decode GuestIdentity:", err);
