@@ -1,0 +1,200 @@
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/orin_identity.json`.
+ */
+export type OrinIdentity = {
+  "address": "FqtrHgdYTph1DSP9jDYD7xrKPrjSjCTtnw6fyKMmboYk",
+  "metadata": {
+    "name": "orinIdentity",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initializeGuest",
+      "docs": [
+        "Initializes a new guest identity (On-chain Identity Layer)",
+        "@param email_hash: SHA256 hash of the guest's email, used to derive the PDA",
+        "@param name: Guest's name or nickname"
+      ],
+      "discriminator": [
+        186,
+        49,
+        55,
+        126,
+        55,
+        88,
+        244,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "guestProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "emailHash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "emailHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "updatePreferences",
+      "docs": [
+        "Updates the guest's ambient preferences (Privacy-First Hash Verification Logic)",
+        "@param new_prefs_hash: The SHA256 Hash of the off-chain JSON preference string"
+      ],
+      "discriminator": [
+        16,
+        64,
+        128,
+        133,
+        19,
+        206,
+        101,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "guestProfile",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "guestProfile"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "newPrefsHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "guestIdentity",
+      "discriminator": [
+        135,
+        23,
+        70,
+        222,
+        201,
+        72,
+        88,
+        229
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "nameTooLong",
+      "msg": "The provided name is too long. Please limit to 100 characters."
+    },
+    {
+      "code": 6001,
+      "name": "unauthorizedAccess",
+      "msg": "Identity verification failed: Only the owner of this account can modify its data."
+    }
+  ],
+  "types": [
+    {
+      "name": "guestIdentity",
+      "docs": [
+        "---------------------------",
+        "Data Structures (State)",
+        "---------------------------"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "emailHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "preferencesHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "loyaltyPoints",
+            "type": "u64"
+          },
+          {
+            "name": "stayCount",
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+};

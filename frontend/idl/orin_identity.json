@@ -1,0 +1,194 @@
+{
+  "address": "FqtrHgdYTph1DSP9jDYD7xrKPrjSjCTtnw6fyKMmboYk",
+  "metadata": {
+    "name": "orin_identity",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initialize_guest",
+      "docs": [
+        "Initializes a new guest identity (On-chain Identity Layer)",
+        "@param email_hash: SHA256 hash of the guest's email, used to derive the PDA",
+        "@param name: Guest's name or nickname"
+      ],
+      "discriminator": [
+        186,
+        49,
+        55,
+        126,
+        55,
+        88,
+        244,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "guest_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "email_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "email_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "update_preferences",
+      "docs": [
+        "Updates the guest's ambient preferences (Privacy-First Hash Verification Logic)",
+        "@param new_prefs_hash: The SHA256 Hash of the off-chain JSON preference string"
+      ],
+      "discriminator": [
+        16,
+        64,
+        128,
+        133,
+        19,
+        206,
+        101,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "guest_profile",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "guest_profile"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_prefs_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "GuestIdentity",
+      "discriminator": [
+        135,
+        23,
+        70,
+        222,
+        201,
+        72,
+        88,
+        229
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NameTooLong",
+      "msg": "The provided name is too long. Please limit to 100 characters."
+    },
+    {
+      "code": 6001,
+      "name": "UnauthorizedAccess",
+      "msg": "Identity verification failed: Only the owner of this account can modify its data."
+    }
+  ],
+  "types": [
+    {
+      "name": "GuestIdentity",
+      "docs": [
+        "---------------------------",
+        "Data Structures (State)",
+        "---------------------------"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "email_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "preferences_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "loyalty_points",
+            "type": "u64"
+          },
+          {
+            "name": "stay_count",
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+}
