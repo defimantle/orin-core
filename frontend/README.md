@@ -1,6 +1,6 @@
 # ORIN Frontend
 
-> The ambient intelligence interface for ORIN — every space knows your song.
+> The ambient intelligence interface for ORIN - every space knows your song.
 
 ## Tech Stack
 
@@ -22,29 +22,29 @@ npm run dev
 
 ```
 src/
-├── app/
-│   ├── layout.tsx          # Root layout (fonts, wallet provider)
-│   ├── page.tsx            # Main page (nav, room control, footer)
-│   └── globals.css         # ORIN design system
-├── components/
-│   └── RoomControl.tsx     # Room control UI (modes, sliders, save)
-├── providers/
-│   └── SolanaWalletProvider.tsx
-└── lib/
-    ├── hash.ts             # Canonical stableStringify + SHA-256
-    ├── pda.ts              # Guest PDA derivation from email
-    ├── api.ts              # Backend API client (POST /api/v1/voice-command)
-    ├── solana.ts           # Anchor program interactions
-    └── savePreferences.ts  # Steps A → B → C orchestrator
+|-- app/
+|   |-- layout.tsx          # Root layout (fonts, wallet provider)
+|   |-- page.tsx            # Main page (nav, room control, footer)
+|   `-- globals.css         # ORIN design system
+|-- components/
+|   `-- RoomControl.tsx     # Room control UI (modes, sliders, save)
+|-- providers/
+|   `-- SolanaWalletProvider.tsx
+`-- lib/
+    |-- hash.ts             # Canonical stableStringify + SHA-256
+    |-- pda.ts              # Guest PDA derivation from email
+    |-- api.ts              # Backend API client (POST /api/v1/voice-command)
+    |-- solana.ts           # Anchor program interactions
+    `-- savePreferences.ts  # Steps A -> B -> C orchestrator
 ```
 
 ## Hash-Lock Workflow
 
 The frontend implements a privacy-first 3-step flow:
 
-1. **Step A** — Send raw command to backend API (staged in Redis)
-2. **Step B** — Compute SHA-256 hash locally using canonical JSON serialization
-3. **Step C** — Write only the 32-byte hash to Solana (`updatePreferences`)
+1. **Step A** - Send raw command to backend API (staged in Redis)
+2. **Step B** - Compute SHA-256 hash locally using canonical JSON serialization
+3. **Step C** - Write only the 32-byte hash to Solana (`updatePreferences`)
 
 The backend listener verifies on-chain hash against AI-generated payload hash before triggering IoT devices.
 

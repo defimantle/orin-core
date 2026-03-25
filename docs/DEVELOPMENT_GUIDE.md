@@ -1,4 +1,4 @@
-# ORIN 🚀 Core Development Guide
+# ORIN Core Development Guide
 
 Welcome to the ORIN Core architecture. This guide is the "Developer Bible" for navigating our local environment, running our Solana/Anchor test suite, and triggering our full-stack IoT/Firebase simulators.
 
@@ -30,7 +30,7 @@ anchor test --skip-local-validator
 ```
 *(Note: Use `--skip-local-validator` if you already have `solana-test-validator` running).*
 
-### 🧪 The 3 Critical Test Cases Explained:
+### The 3 Critical Test Cases Explained:
 
 1. **"Initializes a new Guest Identity!"**
    - **Business Logic**: Proves that an off-chain identity (an Email) can be successfully hashed and converted into a permanent, deterministic Program Derived Address (PDA) on Solana. It validates that initial variables (like defaults and `stayCount: 0`) are correctly allocated in blockspace.
@@ -77,7 +77,7 @@ To prevent developers from encountering `Google OAuth2 / invalid-credential` ter
 
 **How it works:**
 Inside `backend/src/listener.ts`, the script checks for `process.env.GOOGLE_APPLICATION_CREDENTIALS`.
-- **If missing**: It simply bypasses the actual network request and simulates a success log (`[Firebase Sync Mock] ⚠️ Bypassing real Firebase hit`).
+- **If missing**: It simply bypasses the actual network request and simulates a success log (`[Firebase Sync Mock] WARNING: Bypassing real Firebase hit`).
 - **If present**: It securely authenticates and pushes updates to the live RTDB.
 
 **When you are ready to use real Firebase:**
@@ -91,5 +91,5 @@ Inside `backend/src/listener.ts`, the script checks for `process.env.GOOGLE_APPL
 
 ---
 
-*“Code is law, but execution is reality”*  
+*"Code is law, but execution is reality"*  
 **Built with passion by the ORIN Core Team for the Solana Network State Spring 2026**
