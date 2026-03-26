@@ -5,7 +5,7 @@ Hi Defi Mantle,
 Welcome to the ORIN Phase 1 architecture. This document outlines the foundational bridges connecting your Next.js application to the Solana blockchain (Anchor) and our real-time synchronization layer (Firebase). 
 
 Our state architecture follows a distinct flow to ensure sub-second UI updates while maintaining decentralization:
-**Solana (Source of Truth)** �z" **Node.js Listener (Sync)** �z" **Firebase Real-time DB (Low-latency UI)** �z" **React State**.
+**Solana (Source of Truth)** -> **Node.js Listener (Sync)** -> **Firebase Real-time DB (Low-latency UI)** -> **React State**.
 
 Below are the types, derivation methods, and subscription hooks you need to pull this together seamlessly.
 
@@ -131,7 +131,7 @@ export function useGuestRealtimeState(guestPda: string) {
 }
 ```
 
-** Next Steps for Frontend:**
+**Next Steps for Frontend:**
 1. Implement the UI using the `RoomPreferences` interface.
 2. **Hybrid State Mutation**: To update preferences in a privacy-preserving way:
    - **Step A:** Send the raw JSON string to our backend HTTP Gateway (`POST /api/preferences`).

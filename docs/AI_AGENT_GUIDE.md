@@ -73,16 +73,7 @@ creates a 32-byte SHA-256 hash from a canonicalized JSON string.
 
 Canonicalization guarantees stable hashes for the same semantic payload.
 
-## 5. SolRouter Integration Point
-
-`ai_agent.ts` includes a placeholder in `processCommand` for encrypted prompt routing:
-
-- Encrypt prompt/context before outbound model call.
-- Decrypt model response before parsing.
-
-This is where SolRouter SDK can be integrated.
-
-## 6. Deepgram Voice Integration
+## 5. Deepgram Voice Integration
 
 Method:
 
@@ -94,7 +85,7 @@ Behavior:
 - Returns audio as `Buffer` (MPEG bytes).
 - Throws detailed errors on non-200 responses.
 
-## 7. Environment Variables
+## 6. Environment Variables
 
 Required:
 
@@ -107,14 +98,14 @@ Optional:
 - `Deepgram_VOICE_ID` (default: `21m00Tcm4TlvDq8ikWAM`)
 - `Deepgram_MODEL_ID` (default: `eleven_multilingual_v2`)
 
-## 8. Dependencies
+## 7. Dependencies
 
 Installed in `backend/package.json`:
 
 - `@langchain/core`
 - `@langchain/google-genai`
 
-## 9. Minimal Usage Example
+## 8. Minimal Usage Example
 
 ```ts
 import { OrinAgent } from "./ai_agent";
@@ -136,7 +127,7 @@ console.log(payload, hash.toString("hex"));
 const audio = await agent.speak(payload.raw_response);
 ```
 
-## 10. Error Handling Notes
+## 9. Error Handling Notes
 
 - Missing API keys throw explicit errors.
 - Invalid or malformed JSON output from model is rejected.
