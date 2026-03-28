@@ -24,6 +24,6 @@ export const IO_TOPICS = {
 } as const;
 
 export const PATHS = {
-  IDL_PATH: "../../target/idl/orin_identity.json",
+  IDL_PATH: "../src/idl/orin_identity.json",
   AUDIO_OUTPUT: "../response.mp3",
 } as const;
