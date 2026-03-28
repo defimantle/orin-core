@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-background: #050505;
+  --color-card: #0f0f0f;
+  --color-card-hover: #161616;
+  --color-accent: #f59e0b;
+  --color-accent-muted: #78350f;
+  --color-border: #1f1f1f;
+  --color-text-secondary: #a1a1aa;
+  --font-serif: "Cormorant Garamond", serif;
+  --font-mono: "DM Mono", monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-white font-serif antialiased;
+  }
+}
+
+@utility accent-glow {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-card border border-border rounded-2xl overflow-hidden;
+  }
+
+  .accent-button {
+    @apply bg-accent text-black font-medium py-3 px-6 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] accent-glow;
+  }
+
+  .secondary-button {
+    @apply bg-card border border-border text-white font-medium py-3 px-6 rounded-xl transition-all hover:bg-card-hover;
+  }
+
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .animate-marquee {
+    animation: marquee 30s linear infinite;
+  }
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes glitch {
+    0% { transform: translate(0); }
+    20% { transform: translate(-2px, 2px); }
+    40% { transform: translate(-2px, -2px); }
+    60% { transform: translate(2px, 2px); }
+    80% { transform: translate(2px, -2px); }
+    100% { transform: translate(0); }
+  }
+
+  .animate-glitch {
+    animation: glitch 0.3s infinite;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full;
+}

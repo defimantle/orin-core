@@ -1,0 +1,5 @@
+{
+  "name": "Remix: ORIN - Smart Hospitality Stack",
+  "description": "A pixel-perfect clone of the ORIN smart hospitality platform, featuring guest experience, hardware setup, and staff dashboard views.",
+  "requestFramePermissions": []
+}
