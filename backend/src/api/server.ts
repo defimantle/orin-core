@@ -1,34 +1,17 @@
-import Fastify from "fastify";
-import cors, { type FastifyCorsOptions } from "@fastify/cors";
-import multipart from "@fastify/multipart";
-import { createClient } from "@deepgram/sdk";
-import { Connection } from "@solana/web3.js";
+﻿import Fastify from "fastify";
+import websocket from "@fastify/websocket";
+import WebSocket from "ws";
 import { validateEnvOrExit } from "../config/validate_env";
-import { getEnv, getAllowedOrigins } from "../config/env";
+import { getEnv } from "../config/env";
 import { stateProvider } from "../state";
 import { createRequestLogger, logger } from "../shared/logger";
-import { GuestContext, OrinAgent } from "../ai_agent";
-import { generateSha256Hash } from "../shared/hash";
-import { getFeePayerKeypair, relayTransaction } from "../shared/feePayer";
-import { RPC_ENDPOINT } from "../shared/constants";
-
-/**
- * ORIN Production API Gateway
- * -------------------------------------------------------------
- * Receives voice-command payloads from upstream channels
- * (mobile app, web app, voice assistant webhook) and stages
- * them in persistent state for hash-lock verification by listener.
- */
+import { GuestContext, LlmError, OrinAgent } from "../ai_agent";
+import { randomUUID } from "node:crypto";
+import { FAST_INTENTS } from "../config/fast_intents";
 
 validateEnvOrExit();
 const env = getEnv();
-
-// Eagerly validate + load the fee-payer keypair at startup.
-// Fails fast if FEE_PAYER_PRIVATE_KEY is misconfigured rather than at relay time.
-getFeePayerKeypair();
-
-// Shared RPC connection used by the relay endpoint
-const rpcConnection = new Connection(RPC_ENDPOINT, "confirmed");
+const agent = new OrinAgent();
 
 type VoiceCommandBody = {
   guestPda: string;
@@ -36,277 +19,514 @@ type VoiceCommandBody = {
   guestContext: GuestContext;
 };
 
-// ---------------------------------------------------------------------------
-// CORS — Production-grade configuration
-// ---------------------------------------------------------------------------
-// ALLOWED_ORIGIN supports a comma-separated list of origins so this config
-// works identically in local dev and production without code changes.
-// The origin validator uses a Set for O(1) lookup regardless of list size.
-// ---------------------------------------------------------------------------
-const allowedOrigins = new Set(getAllowedOrigins());
+type VoiceTestBody = {
+  userInput: string;
+  guestContext?: GuestContext;
+  deviceId?: string;
+};
 
-/** HTTP methods exposed on every route */
-const ALLOWED_METHODS: string[] = ["GET", "POST", "OPTIONS"];
+type VoiceFastCached = {
+  text: string;
+  audioBase64: string;
+  createdAt: number;
+};
 
-/**
- * Request headers the client is permitted to send.
- * Must explicitly list every non-CORS-safe header the frontend uses.
- */
-const ALLOWED_HEADERS: string[] = [
-  "Content-Type",
-  "Authorization",
-  "X-API-KEY",
-  "X-Request-ID",
-];
-
-/**
- * Response headers the browser is allowed to read from JavaScript.
- * Expose only what the frontend actually needs to inspect.
- */
-const EXPOSED_HEADERS: string[] = ["X-Request-ID"];
+const VOICE_CACHE_TTL_MS = 10 * 60 * 1000;
+const voiceCache = new Map<string, VoiceFastCached>();
+const TTS_CACHE_TTL_MS = 10 * 60 * 1000;
+const ttsCache = new Map<string, VoiceFastCached>();
+const ACK_TEXT = "Dame un segundo y lo resuelvo.";
 
 const app = Fastify({ logger: false });
 
-const corsOptions: FastifyCorsOptions = {
-  /**
-   * Dynamic origin validator.
-   * Returns `true` to echo the origin back (required for credentialed requests);
-   * returns `false` to reject. Falls back to `true` for server-to-server requests
-   * that carry no Origin header (e.g. curl health checks, Railway probe).
-   */
-  origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
-    // Allow server-to-server requests that carry no Origin header (e.g. curl, health checks).
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.has(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin '${origin}' is not permitted.`), false);
-  },
-  methods: ALLOWED_METHODS,
-  allowedHeaders: ALLOWED_HEADERS,
-  exposedHeaders: EXPOSED_HEADERS,
-  credentials: true,              // Required if the frontend ever sends cookies / auth headers.
-  maxAge: 86_400,                 // Cache preflight for 24 h — eliminates per-request OPTIONS round-trips.
-  preflight: true,                // Fastify handles OPTIONS automatically.
-  strictPreflight: false,         // Be lenient: non-preflight OPTIONS still succeed.
-};
+function normalizeInput(input: string): string {
+  return input.toLowerCase().replace(/\s+/g, " ").trim();
+}
 
-app.register(cors, corsOptions);
-// Replaces Express 'multer.memoryStorage()' with Fastify's high-speed equivalent
-app.register(multipart, {
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit for audio uploads
-  },
+function buildCacheKey(userInput: string, guestContext: GuestContext): string {
+  return `${normalizeInput(userInput)}::${guestContext.name.toLowerCase()}::${guestContext.loyaltyPoints}`;
+}
+
+function getVoiceCache(key: string): VoiceFastCached | null {
+  const hit = voiceCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.createdAt > VOICE_CACHE_TTL_MS) {
+    voiceCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function setVoiceCache(key: string, value: VoiceFastCached): void {
+  voiceCache.set(key, value);
+}
+
+function getTtsCache(key: string): VoiceFastCached | null {
+  const hit = ttsCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.createdAt > TTS_CACHE_TTL_MS) {
+    ttsCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function setTtsCache(key: string, value: VoiceFastCached): void {
+  ttsCache.set(key, value);
+}
+
+function ttsKey(text: string): string {
+  return normalizeInput(text);
+}
+
+function findFastIntentReply(userInput: string): string | null {
+  const text = normalizeInput(userInput);
+  const intent = FAST_INTENTS.find((it) => it.keys.some((k) => text.includes(k)));
+  return intent?.reply ?? null;
+}
+
+async function prewarmAckOnly(): Promise<void> {
+  try {
+    if (!voiceCache.has("ack::default")) {
+      const ackAudio = await agent.speak(ACK_TEXT);
+      setVoiceCache("ack::default", {
+        text: ACK_TEXT,
+        audioBase64: ackAudio.toString("base64"),
+        createdAt: Date.now(),
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: message }, "prewarm_ack_failed");
+  }
+}
+
+async function prewarmServices(): Promise<void> {
+  const warmContext: GuestContext = {
+    name: "Warmup",
+    loyaltyPoints: 0,
+    history: ["boot"],
+  };
+
+  try {
+    const text = await agent.generateQuickVoiceReply("Say: ORIN online.", warmContext, {
+      timeoutMs: env.GROQ_TIMEOUT_BG_MS,
+    });
+    await agent.speak(text || "ORIN online.");
+
+    for (const intent of FAST_INTENTS) {
+      const key = `intent::${intent.keys[0]}`;
+      if (!voiceCache.has(key)) {
+        const audio = await agent.speak(intent.reply);
+        setVoiceCache(key, {
+          text: intent.reply,
+          audioBase64: audio.toString("base64"),
+          createdAt: Date.now(),
+        });
+      }
+    }
+
+    logger.info({ preloaded_intents: FAST_INTENTS.length }, "prewarm_complete");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: message }, "prewarm_failed_non_blocking");
+  }
+}
+
+function createDeepgramSocket(): WebSocket {
+  const url =
+    "wss://api.deepgram.com/v1/listen?model=nova-2&language=en&interim_results=true&endpointing=300&smart_format=true";
+  return new WebSocket(url, {
+    headers: {
+      Authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+    },
+  });
+}
+
+app.register(websocket);
+
+app.addHook("onRequest", async (request, reply) => {
+  reply.header("Access-Control-Allow-Origin", "*");
+  reply.header("Access-Control-Allow-Headers", "Content-Type, x-request-id");
+  reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (request.method === "OPTIONS") return reply.code(204).send();
 });
 
 app.post<{ Body: VoiceCommandBody }>("/api/v1/voice-command", async (request, reply) => {
   const reqLogger = createRequestLogger(request.headers["x-request-id"] as string | undefined);
-
-  // Production Auth Check
-  const apiKey = request.headers["x-api-key"];
-  if (apiKey !== env.API_KEY) {
-    reqLogger.warn({ origin: request.headers.origin }, "unauthorized_api_access");
-    return reply.status(401).send({ error: "Unauthorized. Valid X-API-KEY required." });
-  }
-
   const { guestPda, userInput, guestContext } = request.body ?? ({} as VoiceCommandBody);
 
   if (!guestPda || !userInput || !guestContext) {
     reqLogger.error("invalid_request_body");
-    return reply.status(400).send({
-      error: "Invalid body. Required: guestPda, userInput, guestContext",
-    });
+    return reply.status(400).send({ error: "Invalid body. Required: guestPda, userInput, guestContext" });
   }
 
+  await stateProvider.setPendingCommand({ guestPda, userInput, guestContext, createdAt: Date.now() });
+  reqLogger.info({ guest_pda: guestPda }, "pending_command_stored");
+  return reply.status(202).send({ status: "accepted", guestPda, message: "Command staged. Awaiting on-chain hash-lock validation." });
+});
+
+app.post<{ Body: VoiceTestBody }>("/api/v1/voice-fast", async (request, reply) => {
+  const reqLogger = createRequestLogger(request.headers["x-request-id"] as string | undefined);
+  const t0 = Date.now();
+  const { userInput, guestContext, deviceId } = request.body ?? ({} as VoiceTestBody);
+
+  if (!userInput || !userInput.trim()) {
+    return reply.status(400).send({ error: "userInput is required" });
+  }
+
+  const storedPrefs = deviceId ? await stateProvider.getUserPreferences(deviceId) : null;
+  const effectiveGuestContext: GuestContext = guestContext ?? {
+    name: storedPrefs?.name || "User",
+    loyaltyPoints: storedPrefs?.loyaltyPoints ?? 0,
+    history: storedPrefs?.history ?? [],
+  };
+
   try {
-    const agent = new OrinAgent();
-    // 💡 Resolve the AI intent right now during the HTTPS request.
-    // Because the blockchain Hash-Lock demands the user sign the EXACT payload Hash,
-    // we cannot defer AI to the listener. The frontend MUST have the AI's hash to mint the TX.
-    const aiResult = await agent.processCommand(userInput, guestContext);
-    console.log("aiResult", aiResult);
-    const aiHashHex = aiResult.hash.toString("hex");
+    const cacheKey = buildCacheKey(userInput, effectiveGuestContext);
+    const cached = getVoiceCache(cacheKey);
+    if (cached) {
+      const tHit = Date.now();
+      reqLogger.info({ total_ms: tHit - t0 }, "voice_fast_cache_hit");
+      return reply.send({
+        status: "ok",
+        mimeType: "audio/mpeg",
+        audioBase64: cached.audioBase64,
+        latencyMs: { llm: 0, tts: 0, total: tHit - t0 },
+        cached: true,
+        ack: false,
+      });
+    }
 
-    // Stage it exactly like a manual bypass payload so the listener just verifies and executes
-    await stateProvider.setDirectPayload(aiHashHex, aiResult.payload);
-    reqLogger.info({ guest_pda: guestPda, hash: aiHashHex }, "ai_command_resolved_and_staged");
+    const fastReply = findFastIntentReply(userInput);
+    if (fastReply) {
+      const intentKey = FAST_INTENTS.find((it) => it.reply === fastReply)?.keys[0] ?? "intent";
+      const prebuilt = getVoiceCache(`intent::${intentKey}`);
 
-    return reply.status(200).send({
-      status: "accepted",
-      guestPda,
-      hash: aiHashHex, // Send this critical piece to the frontend!
-      message: "Command parsed by AI. Awaiting on-chain hash-lock validation.",
+      if (prebuilt) {
+        setVoiceCache(cacheKey, { ...prebuilt, createdAt: Date.now() });
+        const tHit = Date.now();
+        reqLogger.info({ total_ms: tHit - t0 }, "voice_fast_intent_prebuilt_hit");
+        return reply.send({
+          status: "ok",
+          mimeType: "audio/mpeg",
+          audioBase64: prebuilt.audioBase64,
+          latencyMs: { llm: 0, tts: 0, total: tHit - t0 },
+          cached: true,
+          fastIntent: true,
+          ack: false,
+        });
+      }
+
+      const tA = Date.now();
+      const cachedTts = getTtsCache(ttsKey(fastReply));
+      const audio = cachedTts ? Buffer.from(cachedTts.audioBase64, "base64") : await agent.speak(fastReply);
+      const tB = Date.now();
+      const payload = {
+        text: fastReply,
+        audioBase64: audio.toString("base64"),
+        createdAt: Date.now(),
+      };
+      setTtsCache(ttsKey(fastReply), payload);
+      setVoiceCache(cacheKey, payload);
+      reqLogger.info({ total_ms: tB - t0 }, "voice_fast_intent_tts_only");
+      const responsePayload = {
+        status: "ok",
+        mimeType: "audio/mpeg",
+        audioBase64: payload.audioBase64,
+        latencyMs: { llm: 0, tts: tB - tA, total: tB - t0 },
+        cached: false,
+        fastIntent: true,
+        ack: false,
+      };
+
+      if (deviceId) {
+        const updatedHistory = [userInput, ...(effectiveGuestContext.history ?? [])].slice(0, 10);
+        await stateProvider.setUserPreferences(deviceId, {
+          name: effectiveGuestContext.name,
+          loyaltyPoints: effectiveGuestContext.loyaltyPoints,
+          history: updatedHistory,
+        });
+      }
+
+      return reply.send(responsePayload);
+    }
+
+    const t1 = Date.now();
+    const ack = getVoiceCache("ack::default");
+    if (ack) {
+      setImmediate(async () => {
+        try {
+          const quickText = await agent.generateQuickVoiceReply(userInput, effectiveGuestContext, {
+            timeoutMs: env.GROQ_TIMEOUT_BG_MS,
+          });
+          const t2 = Date.now();
+          const cachedTts = getTtsCache(ttsKey(quickText));
+          const audioBuffer = cachedTts
+            ? Buffer.from(cachedTts.audioBase64, "base64")
+            : await agent.speak(quickText);
+          const t3 = Date.now();
+
+          setVoiceCache(cacheKey, {
+            text: quickText,
+            audioBase64: audioBuffer.toString("base64"),
+            createdAt: Date.now(),
+          });
+          setTtsCache(ttsKey(quickText), {
+            text: quickText,
+            audioBase64: audioBuffer.toString("base64"),
+            createdAt: Date.now(),
+          });
+
+          reqLogger.info({ llm_ms: t2 - t1, tts_ms: t3 - t2, total_ms: t3 - t0 }, "voice_fast_async_cached");
+          if (deviceId) {
+            const updatedHistory = [userInput, ...(effectiveGuestContext.history ?? [])].slice(0, 10);
+            await stateProvider.setUserPreferences(deviceId, {
+              name: effectiveGuestContext.name,
+              loyaltyPoints: effectiveGuestContext.loyaltyPoints,
+              history: updatedHistory,
+            });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          reqLogger.warn({ err: message }, "voice_fast_async_error");
+        }
+      });
+
+      const tAck = Date.now();
+      reqLogger.info({ total_ms: tAck - t0 }, "voice_fast_ack");
+      const responsePayload = {
+        status: "ok",
+        mimeType: "audio/mpeg",
+        audioBase64: ack.audioBase64,
+        latencyMs: { llm: 0, tts: 0, total: tAck - t0 },
+        cached: true,
+        fastIntent: false,
+        ack: true,
+      };
+
+      if (deviceId) {
+        const updatedHistory = [userInput, ...(effectiveGuestContext.history ?? [])].slice(0, 10);
+        await stateProvider.setUserPreferences(deviceId, {
+          name: effectiveGuestContext.name,
+          loyaltyPoints: effectiveGuestContext.loyaltyPoints,
+          history: updatedHistory,
+        });
+      }
+
+      return reply.send(responsePayload);
+    }
+
+    const quickText = await agent.generateQuickVoiceReply(userInput, effectiveGuestContext, {
+      timeoutMs: env.GROQ_TIMEOUT_BG_MS,
     });
-  } catch (error: any) {
-    reqLogger.error({ error: error.message }, "ai_processing_error");
-    return reply.status(500).send({ error: "Voice AI processing failed", details: error.message });
+    const t2 = Date.now();
+    const cachedTts = getTtsCache(ttsKey(quickText));
+    const audioBuffer = cachedTts ? Buffer.from(cachedTts.audioBase64, "base64") : await agent.speak(quickText);
+    const t3 = Date.now();
+
+    setVoiceCache(cacheKey, {
+      text: quickText,
+      audioBase64: audioBuffer.toString("base64"),
+      createdAt: Date.now(),
+    });
+    setTtsCache(ttsKey(quickText), {
+      text: quickText,
+      audioBase64: audioBuffer.toString("base64"),
+      createdAt: Date.now(),
+    });
+
+    reqLogger.info({ llm_ms: t2 - t1, tts_ms: t3 - t2, total_ms: t3 - t0 }, "voice_fast_success");
+
+    const responsePayload = {
+      status: "ok",
+      mimeType: "audio/mpeg",
+      audioBase64: audioBuffer.toString("base64"),
+      latencyMs: { llm: t2 - t1, tts: t3 - t2, total: t3 - t0 },
+      cached: false,
+      fastIntent: false,
+      ack: false,
+    };
+
+    if (deviceId) {
+      const updatedHistory = [userInput, ...(effectiveGuestContext.history ?? [])].slice(0, 10);
+      await stateProvider.setUserPreferences(deviceId, {
+        name: effectiveGuestContext.name,
+        loyaltyPoints: effectiveGuestContext.loyaltyPoints,
+        history: updatedHistory,
+      });
+    }
+
+    return reply.send(responsePayload);
+  } catch (error) {
+    if (error instanceof LlmError && (error.kind === "timeout" || error.kind === "quota")) {
+      const tFallbackStart = Date.now();
+      const fallbackReply =
+        findFastIntentReply(userInput) ?? "Disculpá, tuve un problema de red. ¿Podés repetir?";
+
+      try {
+        const cachedTts = getTtsCache(ttsKey(fallbackReply));
+        const audioBuffer = cachedTts
+          ? Buffer.from(cachedTts.audioBase64, "base64")
+          : await agent.speak(fallbackReply);
+        const tFallbackEnd = Date.now();
+        setTtsCache(ttsKey(fallbackReply), {
+          text: fallbackReply,
+          audioBase64: audioBuffer.toString("base64"),
+          createdAt: Date.now(),
+        });
+        reqLogger.warn(
+          {
+            reason: error.kind,
+            total_ms: tFallbackEnd - t0,
+          },
+          "voice_fast_fallback"
+        );
+
+        return reply.send({
+          status: "ok",
+          mimeType: "audio/mpeg",
+          audioBase64: audioBuffer.toString("base64"),
+          latencyMs: { llm: 0, tts: tFallbackEnd - tFallbackStart, total: tFallbackEnd - t0 },
+          cached: false,
+          fastIntent: Boolean(findFastIntentReply(userInput)),
+          fallback: true,
+          ack: false,
+        });
+      } catch (fallbackError) {
+        const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        reqLogger.error({ err: message }, "voice_fast_fallback_error");
+        return reply.status(503).send({ error: message });
+      }
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    reqLogger.error({ err: message }, "voice_fast_error");
+    return reply.status(500).send({ error: message });
   }
 });
 
-/**
- * DIRECT BYPASS ENDPOINT (Web2.5 High-Speed Channel)
- * -------------------------------------------------------------
- * For manual slider adjustments on the frontend that do not require
- * AI inference. Receives explicit JSON, computes the canonical hash,
- * and caches it directly in Redis awaiting Solana confirmation.
- */
-app.post<{ Body: Record<string, unknown> }>("/api/v1/preferences", async (request, reply) => {
-  const reqLogger = createRequestLogger(request.headers["x-request-id"] as string | undefined);
+app.get("/api/v1/stt-stream", { websocket: true }, (connection: any) => {
+  const clientSocket = connection.socket as WebSocket;
+  const dgSocket = createDeepgramSocket();
+  const sessionId = randomUUID();
+  const t0 = Date.now();
+  let firstTokenAt: number | null = null;
+  let transcript = "";
+  let replySent = false;
 
-  // Production Auth Check: Protect memory exhaust attacks from unauthorized payloads
-  const apiKey = request.headers["x-api-key"];
-  if (apiKey !== env.API_KEY) {
-    reqLogger.warn({ origin: request.headers.origin }, "unauthorized_bypass_access");
-    return reply.status(401).send({ error: "Unauthorized. Valid X-API-KEY required." });
-  }
+  const sendClient = (data: unknown) => {
+    if (clientSocket.readyState === WebSocket.OPEN) {
+      clientSocket.send(JSON.stringify(data));
+    }
+  };
 
-  // Ensure payload is an actual object preventing injection or bad formats
-  if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
-    reqLogger.error("invalid_preferences_body");
-    return reply.status(400).send({ error: "Invalid JSON object for preferences." });
-  }
+  dgSocket.on("open", () => {
+    sendClient({ type: "ready" });
+    logger.info({ session_id: sessionId }, "stt_stream_open");
+  });
 
-  // Hash the ENTIRE canonical body — frontend must hash the same full object
-  const hashHex = generateSha256Hash(request.body).toString("hex");
+  dgSocket.on("message", (raw) => {
+    try {
+      const evt = JSON.parse(raw.toString()) as any;
+      const text = evt?.channel?.alternatives?.[0]?.transcript as string | undefined;
+      const isFinal = Boolean(evt?.is_final);
+      if (text && text.trim()) {
+        if (!firstTokenAt) firstTokenAt = Date.now();
+        if (isFinal) transcript = `${transcript} ${text}`.trim();
+        sendClient({ type: "transcript", text, final: isFinal });
 
-  await stateProvider.setDirectPayload(hashHex, request.body);
-  reqLogger.info({ hash: hashHex }, "direct_payload_stored");
+        if (isFinal && !replySent) {
+          replySent = true;
+          (async () => {
+            try {
+              const quickText = await agent.generateQuickVoiceReply(text, {
+                name: "User",
+                loyaltyPoints: 0,
+                history: [],
+              });
+              const audioBuffer = await agent.speak(quickText);
+              sendClient({
+                type: "reply",
+                text: quickText,
+                mimeType: "audio/mpeg",
+                audioBase64: audioBuffer.toString("base64"),
+              });
+            } catch (err) {
+              sendClient({ type: "error", error: (err as Error)?.message ?? String(err) });
+            }
+          })();
+        }
+      }
+    } catch {
+      // no-op
+    }
+  });
 
-  return reply.status(200).send({
-    status: "success",
-    info: "Payload staged in Redis cache bypassing AI. Awaiting Solana Hash Verification signal.",
-    hash: hashHex
+  dgSocket.on("error", (err) => {
+    sendClient({ type: "error", error: err.message });
+  });
+
+  clientSocket.on("message", (msg: any, isBinary: boolean) => {
+    if (isBinary) {
+      if (dgSocket.readyState === WebSocket.OPEN) {
+        dgSocket.send(msg);
+      }
+      return;
+    }
+
+    try {
+      const cmd = JSON.parse(msg.toString()) as { type?: string };
+      if (cmd.type === "stop") {
+        if (dgSocket.readyState === WebSocket.OPEN) {
+          dgSocket.send(JSON.stringify({ type: "CloseStream" }));
+          dgSocket.close();
+        }
+        const tDone = Date.now();
+        logger.info(
+          {
+            session_id: sessionId,
+            first_token_ms: firstTokenAt ? firstTokenAt - t0 : null,
+            total_ms: tDone - t0,
+          },
+          "stt_stream_done"
+        );
+        sendClient({ type: "done", text: transcript.trim() });
+      }
+    } catch {
+      // no-op
+    }
+  });
+
+  clientSocket.on("close", () => {
+    if (dgSocket.readyState === WebSocket.OPEN) {
+      dgSocket.send(JSON.stringify({ type: "CloseStream" }));
+      dgSocket.close();
+    }
+    const tClose = Date.now();
+    logger.info(
+      {
+        session_id: sessionId,
+        first_token_ms: firstTokenAt ? firstTokenAt - t0 : null,
+        total_ms: tClose - t0,
+      },
+      "stt_stream_closed"
+    );
   });
 });
 
-
-/**
- * VOICE TRANSCRIPTION ENDPOINT (AI Interface Channel)
- * -------------------------------------------------------------
- * Takes incoming audio data (multipart/form-data), transcribes it
- * using Deepgram Nova-2 via their in-memory buffers (zero disk I/O),
- * and returns the structured LLM-ready text string.
- */
-app.post("/api/v1/transcribe", async (request, reply) => {
-  const reqLogger = createRequestLogger(request.headers["x-request-id"] as string | undefined);
-
-  // Production Auth Check: Protect costly upstream Deepgram tokens
-  const apiKey = request.headers["x-api-key"];
-  if (apiKey !== env.API_KEY) {
-    reqLogger.warn({ origin: request.headers.origin }, "unauthorized_transcription_access");
-    return reply.status(401).send({ error: "Unauthorized. Valid X-API-KEY required." });
-  }
-
-  try {
-    const data = await request.file();
-    if (!data) {
-      reqLogger.error("no_audio_file");
-      return reply.status(400).send({ error: "No audio file provided in the payload." });
-    }
-
-    const audioBuffer = await data.toBuffer();
-
-    const deepgramApiKey = env.DEEPGRAM_API_KEY;
-    if (!deepgramApiKey) {
-      reqLogger.error("deepgram_key_missing");
-      return reply.status(500).send({ error: "Internal Server Error. Deepgram API configuration missing." });
-    }
-
-    const deepgram = createClient(deepgramApiKey);
-
-    // Deepgram allows sending pure Buffers natively if we provide the exact configuration
-    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
-      audioBuffer,
-      {
-        model: env.DEEPGRAM_STT_MODEL,
-        smart_format: true,
-      }
-    );
-
-    if (error) {
-      reqLogger.error({ error }, "deepgram_api_failure");
-      return reply.status(500).send({ error: "Transcription failed.", details: error.message });
-    }
-
-    // Safely extract the primary transcript result
-    const transcript = result?.results?.channels[0]?.alternatives[0]?.transcript || "";
-    
-    reqLogger.info({ bytes: audioBuffer.byteLength, transcript_length: transcript.length }, "audio_transcribed");
-    return reply.status(200).send({
-      status: "success",
-      text: transcript,
-    });
-  } catch (error: any) {
-    reqLogger.error({ error: error.message }, "transcription_endpoint_error");
-    return reply.status(500).send({
-      error: "Internal server error during transcription.",
-      details: error.message,
-    });
-  }
-});
-
-/**
- * GAS RELAY ENDPOINT (FeePayer / Account Abstraction)
- * -------------------------------------------------------------
- * Accepts a base64-encoded, PARTIALLY-SIGNED Solana transaction
- * from the frontend. The guest wallet has already signed the
- * instruction-authorizing signature. This endpoint adds the
- * server's fee-payer co-signature so the guest pays zero gas.
- *
- * Security model:
- *   - X-API-KEY auth required (same as all other routes).
- *   - The Anchor program's `has_one = owner` constraint ensures
- *     the server's fee-payer key cannot forge guest instructions.
- *   - We validate feePayer matches our server key before signing.
- *   - recentBlockhash presence is enforced to block replay attacks.
- */
-app.post<{ Body: { transaction: string } }>("/api/v1/relay", async (request, reply) => {
-  const reqLogger = createRequestLogger(request.headers["x-request-id"] as string | undefined);
-
-  // Auth guard
-  const apiKey = request.headers["x-api-key"];
-  if (apiKey !== env.API_KEY) {
-    reqLogger.warn({ origin: request.headers.origin }, "unauthorized_relay_access");
-    return reply.status(401).send({ error: "Unauthorized. Valid X-API-KEY required." });
-  }
-
-  const { transaction } = request.body ?? {};
-
-  if (!transaction || typeof transaction !== "string") {
-    reqLogger.error("missing_transaction_payload");
-    return reply.status(400).send({
-      error: "Invalid body. Required: { transaction: string } (base64-encoded serialized Transaction)",
-    });
-  }
-
-  try {
-    reqLogger.info("relay_request_received");
-    const result = await relayTransaction(rpcConnection, transaction);
-    reqLogger.info(
-      { signature: result.signature, fee_payer: result.feePayerPubkey },
-      "relay_success"
-    );
-    return reply.status(200).send({
-      status: "success",
-      signature: result.signature,
-      feePayerPubkey: result.feePayerPubkey,
-      message: "Transaction co-signed and broadcast. Gas subsidized by ORIN.",
-    });
-  } catch (error: any) {
-    reqLogger.error({ error: error.message }, "relay_error");
-    return reply.status(500).send({
-      error: "Relay failed.",
-      details: error.message,
-    });
-  }
-});
-
+app.get("/api/v1/warmup", async () => ({ status: "warm", cacheSize: voiceCache.size }));
 app.get("/health", async () => ({ status: "ok" }));
 
-/**
- * Starts Fastify server with validated env configuration.
- */
 export async function startApiServer(): Promise<void> {
+  await prewarmAckOnly();
   await app.listen({ host: env.API_HOST, port: env.API_PORT });
   logger.info({ host: env.API_HOST, port: env.API_PORT }, "api_server_started");
+  setImmediate(() => {
+    prewarmServices().catch((err) => {
+      logger.warn({ err: err?.message ?? String(err) }, "prewarm_services_error");
+    });
+  });
 }
 
 if (require.main === module) {
@@ -315,3 +535,4 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
