@@ -16,6 +16,12 @@ const envSchema = z.object({
   DEEPGRAM_API_KEY: z.string().min(1),
   DEEPGRAM_TTS_MODEL: z.string().min(1).default("aura-2-orion-en"),
   DEEPGRAM_STT_MODEL: z.string().min(1).default("nova-2"),
+  
+  // Edge AI Pipeline Configuration (Feature Flags)
+  USE_EDGE_PIPELINE: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+  EDGE_LLM_ENDPOINT: z.string().url().default("http://127.0.0.1:11434/api/chat"),
+  EDGE_TTS_ENDPOINT: z.string().url().default("http://127.0.0.1:5002/api/tts"),
+
   MQTT_BROKER_URL: z.string().min(1),
   MQTT_TOPIC: z.string().min(1),
   REDIS_URL: z.string().min(1),

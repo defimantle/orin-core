@@ -147,7 +147,7 @@ export function startSecureGatewayListener(): number {
 
         if (payload.raw_response) {
           const audioBuffer = await agent.speak(payload.raw_response);
-          fs.writeFileSync(audioPath, audioBuffer);
+          await fs.promises.writeFile(audioPath, audioBuffer);
           requestLog.info({ path: audioPath }, "voice_feedback_written");
         } else {
           requestLog.info("no_raw_response_skip_voice");
