@@ -80,7 +80,7 @@ const Logo = ({ className }: { className?: string }) => (
   >
     <path d="M0 0L800 0L800 800L0 800L0 0Z" fill="transparent"/>
     <g transform="matrix(1.7 0 0 1.7 -267 -438)">
-      <path d="M289.333 452.901C289.691 450.36 290.282 447.371 290.876 444.851C297.134 417.654 313.959 394.067 337.636 379.302C361.664 364.349 390.715 359.749 418.185 366.548C446.847 374.627 468.432 390.973 483.721 416.916C497.092 439.605 497.745 472.576 496.479 498.613C496.815 535.146 497.487 576.636 496.317 612.838C504.746 617.675 507.147 619.235 516.725 621.689C524.711 623.734 562.854 620.099 566.245 623.718C565.996 626.021 563.423 626.26 561.39 626.32C554.135 626.534 546.865 626.236 539.594 626.227L491.541 626.212L293.318 626.181L248.682 626.146C243.139 626.17 222.518 627.366 219.108 624.25C221.166 621.213 244.353 622.101 248.652 622.084L299.494 621.853L505.945 622.15C491.712 615.107 477.643 607.937 462.741 602.279C407.484 581.297 346.545 574.153 287.763 578.888C278.2 579.659 257.547 581.239 248.572 583.091L246.38 581.92C260.42 578.892 274.355 577.112 288.581 575.288C288.738 550.009 288.711 524.729 288.5 499.45C288.466 483.671 288.196 468.672 289.333 452.901Z" fill="#222"/>
+      <path d="M289.333 452.901C289.691 450.36 290.282 447.371 290.876 444.851C297.134 417.654 313.959 394.067 337.636 379.302C361.664 364.349 390.715 359.749 418.185 366.548C446.847 374.627 468.432 390.973 483.721 416.916C497.092 439.605 497.745 472.576 496.479 498.613C496.815 535.146 497.487 576.636 496.317 612.838C504.746 617.675 507.147 619.235 516.725 621.689C524.711 623.734 562.854 620.099 566.245 623.718C565.996 626.021 563.423 626.26 561.39 626.32C554.135 626.534 546.865 626.236 539.594 626.227L491.541 626.212L293.318 626.181L248.682 626.146C243.139 626.17 222.518 627.366 219.108 624.25C221.166 621.213 244.353 622.101 248.652 622.084L299.494 621.853L505.945 622.15C491.712 615.107 477.643 607.937 462.741 602.279C407.484 581.297 346.545 574.153 287.763 578.888C278.2 579.659 257.547 581.239 248.572 583.091L246.38 581.92C260.42 578.892 274.355 577.112 288.581 575.288C288.738 550.009 288.711 524.729 288.5 499.45C288.466 483.671 288.196 468.672 289.333 452.901Z" fill="var(--text-primary)" />
       <defs>
         <linearGradient id="gradient_0" gradientUnits="userSpaceOnUse" x1="367.52817" y1="684.8429" x2="451.23749" y2="480.24564">
           <stop offset="0" stopColor="#80663C"/>
@@ -1142,7 +1142,7 @@ const Dashboard = ({
         >
           {isSaving ? "Syncing to Solana..." : "Save my setup →"}
           {!isSaving && (
-            <div className="absolute top-0 right-0 bg-black/10 px-2 py-0.5 text-[8px] uppercase tracking-tighter rounded-bl-lg font-mono">
+            <div className="absolute top-0 right-0 bg-accent/20 text-accent px-2 py-0.5 text-[8px] uppercase tracking-tighter rounded-bl-lg font-mono font-bold">
               Gasless Sync
             </div>
           )}
@@ -1484,14 +1484,14 @@ export default function App() {
           className="flex flex-col items-center space-y-8"
         >
           <Logo className="w-32 h-32" />
-          <div className="w-48 h-1 bg-zinc-900 rounded-full overflow-hidden">
+          <div className="w-48 h-1 bg-border/20 rounded-full overflow-hidden">
             <motion.div
               className="h-full bg-accent"
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
             />
           </div>
-          <p className="text-zinc-500 font-mono text-[10px] uppercase tracking-[0.3em] animate-pulse">
+          <p className="text-text-muted font-mono text-[10px] uppercase tracking-[0.3em] animate-pulse">
             Initializing ORIN
           </p>
         </motion.div>
@@ -1500,7 +1500,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-text-primary selection:bg-accent selection:text-black relative overflow-hidden">
+    <div className="min-h-screen bg-background text-text-primary selection:bg-accent selection:text-text-primary relative overflow-hidden">
       {/* Background Peripheral Glows — Pure Aesthetics */}
       <div className="fixed -top-[20%] -right-[10%] w-[60%] h-[60%] bg-accent/5 blur-[120px] rounded-full pointer-events-none z-0" />
       <div className="fixed -bottom-[10%] -left-[10%] w-[40%] h-[40%] bg-accent/10 blur-[100px] rounded-full pointer-events-none z-0" />

@@ -52,7 +52,7 @@
 }
 
 @utility accent-glow {
-  box-shadow: 0 0 20px rgba(196, 169, 122, 0.15);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 @layer components {
@@ -61,11 +61,11 @@
   }
 
   .accent-button {
-    @apply bg-accent text-black font-medium py-3 px-6 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] accent-glow;
+    @apply bg-accent text-[#332F2E] font-medium py-3 px-6 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] accent-glow;
   }
 
   .secondary-button {
-    @apply bg-card border border-border text-white font-medium py-3 px-6 rounded-xl transition-all hover:bg-card-hover;
+    @apply bg-card border border-border text-text-primary font-medium py-3 px-6 rounded-xl transition-all hover:bg-card-hover;
   }
 
   @keyframes marquee {
