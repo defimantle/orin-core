@@ -108,7 +108,7 @@ const Card = ({ children, className, onClick }: { children: React.ReactNode; cla
     whileHover={onClick ? { scale: 1.01, backgroundColor: "var(--card-hover)" } : {}}
     whileTap={onClick ? { scale: 0.99 } : {}}
     className={cn(
-      "bg-card border border-border rounded-2xl p-6 transition-all relative overflow-hidden",
+      "bg-card border border-border rounded-2xl p-6 transition-all relative overflow-hidden text-text-primary",
       onClick && "cursor-pointer",
       className
     )}
@@ -283,7 +283,7 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
 
             <button
               onClick={() => setStep(step + 1)}
-              className="w-full xs:w-auto bg-accent text-black px-10 py-3.5 md:py-3 rounded-xl font-bold md:font-medium hover:bg-accent-light transition-all accent-glow text-sm"
+              className="w-full xs:w-auto bg-accent text-[#332F2E] px-10 py-3.5 md:py-3 rounded-xl font-bold md:font-medium hover:bg-accent-light transition-all accent-glow text-sm"
             >
               {step < 2 ? "Continue" : "Register Identity"} <ArrowRight size={14} className="inline ml-1" />
             </button>
@@ -322,7 +322,7 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
               className={cn(
                 "w-full py-4.5 md:py-4 rounded-xl font-bold transition-all text-sm md:text-base",
                 name.trim()
-                  ? "bg-accent text-black accent-glow"
+                  ? "bg-accent text-[#332F2E] accent-glow"
                   : "bg-card/50 text-text-muted/40 cursor-not-allowed border border-border/50"
               )}
             >
@@ -805,7 +805,7 @@ const Dashboard = ({
       {/* Active Requests (Visible only if requests exist) */}
       {activeRequests.length > 0 && (
         <motion.div variants={itemVariants}>
-          <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest mb-3">Active Requests</p>
+          <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest mb-3">Active Requests</p>
           <div className="space-y-2">
             {activeRequests.map((req, i) => (
               <Card key={i} className="flex items-center justify-between border-accent/20 bg-accent/5 p-4">
@@ -817,7 +817,7 @@ const Dashboard = ({
                 </div>
                 <button 
                   onClick={() => setActiveRequests(prev => prev.filter((_, idx) => idx !== i))}
-                  className="text-zinc-500 hover:text-white transition-colors p-1"
+                  className="text-text-muted hover:text-text-primary transition-colors p-1"
                 >
                   <ChevronRight size={16} />
                 </button>
@@ -841,7 +841,7 @@ const Dashboard = ({
           </div>
           <div className="flex-1">
             <p className="font-bold text-sm">Your preferences are being recorded</p>
-            <p className="text-zinc-500 text-xs">ORIN learns from every interaction to personalize your experience</p>
+            <p className="text-text-muted text-xs">ORIN learns from every interaction to personalize your experience</p>
           </div>
           <motion.div
             animate={{ scale: [1, 1.3, 1], opacity: [0.5, 1, 0.5] }}
@@ -853,7 +853,7 @@ const Dashboard = ({
 
       {/* Environmental Data */}
       <motion.div variants={itemVariants}>
-        <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest mb-3">Environment</p>
+        <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest mb-3">Environment</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { icon: Thermometer, label: "Climate", value: `${target_temp_c}°C · ${nestMode}`, color: "text-accent" },
@@ -864,7 +864,7 @@ const Dashboard = ({
             <Card key={item.label} className="space-y-2 md:space-y-3 p-3 md:p-4">
               <item.icon size={16} className={item.color} />
               <div>
-                <p className="text-zinc-500 text-[8px] md:text-[9px] uppercase tracking-widest leading-tight">{item.label}</p>
+                <p className="text-text-muted text-[8px] md:text-[9px] uppercase tracking-widest leading-tight">{item.label}</p>
                 <p className="font-bold text-base md:text-lg capitalize">{item.value}</p>
               </div>
             </Card>
@@ -874,24 +874,24 @@ const Dashboard = ({
 
       {/* Quick Actions */}
       <motion.div variants={itemVariants}>
-        <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest mb-3">Quick Actions</p>
+        <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest mb-3">Quick Actions</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Card onClick={() => setActiveTab("assistant")} className="flex items-center gap-4 p-4 md:p-5 group hover:border-accent/30 transition-all cursor-pointer">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-black transition-all duration-500 flex-shrink-0">
+            <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-[#332F2E] transition-all duration-500 flex-shrink-0">
               <MessageSquare className="w-5 h-5 md:w-[22px] md:h-[22px]" />
             </div>
             <div>
               <h4 className="font-bold text-sm">Talk to ORIN</h4>
-              <p className="text-zinc-500 text-[10px] md:text-xs">Voice or text</p>
+              <p className="text-text-muted text-[10px] md:text-xs">Voice or text</p>
             </div>
           </Card>
           <Card onClick={() => setActiveTab("control")} className="flex items-center gap-4 p-4 md:p-5 group hover:border-accent/30 transition-all cursor-pointer">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-black transition-all duration-500 flex-shrink-0">
+            <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-[#332F2E] transition-all duration-500 flex-shrink-0">
               <Zap className="w-5 h-5 md:w-[22px] md:h-[22px]" />
             </div>
             <div>
               <h4 className="font-bold text-sm">Room Control</h4>
-              <p className="text-zinc-500 text-[10px] md:text-xs">Manual adjustments</p>
+              <p className="text-text-muted text-[10px] md:text-xs">Manual adjustments</p>
             </div>
           </Card>
         </div>
@@ -899,19 +899,19 @@ const Dashboard = ({
 
       {/* Stats */}
       <motion.div variants={itemVariants}>
-        <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest mb-3">Your ORIN Stats</p>
+        <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest mb-3">Your ORIN Stats</p>
         <div className="grid grid-cols-3 gap-3">
           <Card className="text-center p-4">
             <p className="text-2xl font-bold text-accent font-mono">{loyaltyPoints}</p>
-            <p className="text-zinc-500 text-[9px] uppercase tracking-widest mt-1">ORIN Points</p>
+            <p className="text-text-muted text-[9px] uppercase tracking-widest mt-1">ORIN Points</p>
           </Card>
           <Card className="text-center p-4">
             <p className="text-2xl font-bold font-mono">{stayCount}</p>
-            <p className="text-zinc-500 text-[9px] uppercase tracking-widest mt-1">Activations</p>
+            <p className="text-text-muted text-[9px] uppercase tracking-widest mt-1">Activations</p>
           </Card>
           <Card className="text-center p-4">
             <p className="text-2xl font-bold font-mono text-emerald-500">✓</p>
-            <p className="text-zinc-500 text-[9px] uppercase tracking-widest mt-1">Verified</p>
+            <p className="text-text-muted text-[9px] uppercase tracking-widest mt-1">Verified</p>
           </Card>
         </div>
       </motion.div>
@@ -1040,7 +1040,9 @@ const Dashboard = ({
               }}
               className={cn(
                 "flex flex-col items-center gap-2 md:gap-3 p-3 md:p-5 transition-all cursor-pointer",
-                lightingMode === scene.light ? "border-accent bg-accent/10 accent-glow" : "bg-card border-border hover:bg-card-hover"
+                lightingMode === scene.light 
+                  ? "border-accent bg-accent/20 accent-glow shadow-accent/20" 
+                  : "bg-card border-border hover:bg-card-hover"
               )}
             >
               <scene.icon size={20} className={lightingMode === scene.light ? "text-accent" : "text-text-muted"} />
@@ -1137,12 +1139,12 @@ const Dashboard = ({
             "w-full py-4 rounded-xl font-bold transition-all text-sm relative overflow-hidden group border",
             isSaving
               ? "bg-card/50 text-text-muted/50 cursor-not-allowed border-border"
-              : "bg-accent text-black accent-glow hover:scale-[1.02] active:scale-[0.98] border-accent"
+              : "bg-accent text-[#332F2E] accent-glow hover:scale-[1.02] active:scale-[0.98] border-accent"
           )}
         >
           {isSaving ? "Syncing to Solana..." : "Save my setup →"}
           {!isSaving && (
-            <div className="absolute top-0 right-0 bg-accent/20 text-accent px-2 py-0.5 text-[8px] uppercase tracking-tighter rounded-bl-lg font-mono font-bold">
+            <div className="absolute top-0 right-0 bg-accent/10 text-accent px-2 py-0.5 text-[8px] uppercase tracking-tighter rounded-bl-lg font-mono font-bold">
               Gasless Sync
             </div>
           )}
@@ -1169,7 +1171,7 @@ const Dashboard = ({
                 guestName.charAt(0).toUpperCase()
               )}
             </div>
-            <label className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center cursor-pointer shadow-lg hover:scale-110 active:scale-95 transition-all opacity-0 group-hover:opacity-100">
+            <label className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-accent text-[#332F2E] flex items-center justify-center cursor-pointer shadow-lg hover:scale-110 active:scale-95 transition-all opacity-0 group-hover:opacity-100">
               <Camera size={16} />
               <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
             </label>
@@ -1302,7 +1304,7 @@ const Dashboard = ({
         <div className="flex items-center gap-2 md:gap-3">
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-xl bg-card/50 border border-border text-text-muted hover:text-accent hover:border-accent/30 transition-all flex items-center justify-center"
+            className="p-2 rounded-xl bg-card border border-border text-text-muted hover:text-accent hover:border-accent/30 transition-all flex items-center justify-center"
             title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
             {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
