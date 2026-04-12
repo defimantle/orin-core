@@ -53,8 +53,8 @@ import { cn } from "../lib/utils";
 // Wallet & Solana Hooks
 import { useWallet, useAnchorWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { transcribeAudio, fetchFastVoiceReply, fetchDeviceStatus, fetchTtsAudio } from "../lib/api";
-import { saveManualPreferences, saveVoicePreferences, getRelayOpts } from "../lib/savePreferences";
+import { transcribeAudio, fetchFastVoiceReply, fetchDeviceStatus, fetchTtsAudio, updateGuestAvatar, fetchGuestProfileApi } from "../lib/api";
+import { saveManualPreferences, saveVoicePreferences, getRelayOpts, RoomPreferences } from "../lib/savePreferences";
 import { getProgram, getProvider, initializeGuestOnChain, fetchGuestProfile, getConnection } from "../lib/solana";
 import { deriveGuestPda, ORIN_PROGRAM_ID } from "../lib/pda";
 import idl from "../../idl/orin_identity.json";
@@ -88,7 +88,7 @@ const Logo = ({ className }: { className?: string }) => (
   >
     <path d="M0 0L800 0L800 800L0 800L0 0Z" fill="transparent"/>
     <g transform="matrix(1.7 0 0 1.7 -267 -438)">
-      <path d="M289.333 452.901C289.691 450.36 290.282 447.371 290.876 444.851C297.134 417.654 313.959 394.067 337.636 379.302C361.664 364.349 390.715 359.749 418.185 366.548C446.847 374.627 468.432 390.973 483.721 416.916C497.092 439.605 497.745 472.576 496.479 498.613C496.815 535.146 497.487 576.636 496.317 612.838C504.746 617.675 507.147 619.235 516.725 621.689C524.711 623.734 562.854 620.099 566.245 623.718C565.996 626.021 563.423 626.26 561.39 626.32C554.135 626.534 546.865 626.236 539.594 626.227L491.541 626.212L293.318 626.181L248.682 626.146C243.139 626.17 222.518 627.366 219.108 624.25C221.166 621.213 244.353 622.101 248.652 622.084L299.494 621.853L505.945 622.15C491.712 615.107 477.643 607.937 462.741 602.279C407.484 581.297 346.545 574.153 287.763 578.888C278.2 579.659 257.547 581.239 248.572 583.091L246.38 581.92C260.42 578.892 274.355 577.112 288.581 575.288C288.738 550.009 288.711 524.729 288.5 499.45C288.466 483.671 288.196 468.672 289.333 452.901Z" fill="var(--text-primary)" />
+      <path d="M289.333 452.901C289.691 450.36 290.282 447.371 290.876 444.851C297.134 417.654 313.959 394.067 337.636 379.302C361.664 364.349 390.715 359.749 418.185 366.548C446.847 374.627 468.432 390.973 483.721 416.916C497.092 439.605 497.745 472.576 496.479 498.613C496.815 535.146 497.487 576.636 496.317 612.838C504.746 617.675 507.147 619.235 516.725 621.689C524.711 623.734 562.854 620.099 566.245 623.718C565.996 626.021 563.423 626.26 561.39 626.32C554.135 626.534 546.865 626.236 539.594 626.227L491.541 626.212L293.318 626.181L248.682 626.146C243.139 626.17 222.518 627.366 219.108 624.25C221.166 621.213 244.353 622.101 248.652 622.084L299.494 621.853L505.945 622.15C491.712 615.107 477.643 607.937 462.741 602.279C407.484 581.297 346.545 574.153 287.763 578.888C278.2 579.659 257.547 581.239 248.572 583.091L246.38 581.92C260.42 578.892 274.355 577.112 288.581 575.288C288.738 550.009 288.711 524.729 288.5 499.45C288.466 483.671 288.196 468.672 289.333 452.901Z" fill="#000000" />
       <defs>
         <linearGradient id="gradient_0" gradientUnits="userSpaceOnUse" x1="367.52817" y1="684.8429" x2="451.23749" y2="480.24564">
           <stop offset="0" stopColor="#80663C"/>
@@ -171,11 +171,11 @@ const LandingPage = ({ onConnect }: { onConnect: () => void }) => {
       className="min-h-screen flex flex-col items-center justify-center p-6 md:p-12 max-w-2xl mx-auto text-center"
     >
       <motion.div variants={itemVariants} className="flex flex-col items-center space-y-6 md:space-y-8">
-        <Logo className="w-24 h-24 md:w-36 md:h-36" />
+        <Logo className="w-24 h-24 md:w-32 md:h-32 mb-2" />
         <div className="space-y-3 md:space-y-4">
-          <h1 className="text-5xl xs:text-6xl md:text-8xl font-light tracking-tighter font-serif leading-none">ORIN</h1>
-          <p className="text-accent font-mono text-[9px] md:text-xs uppercase tracking-[0.4em] md:tracking-[0.5em]">Your Personal AI Concierge</p>
-          <p className="text-text-secondary text-base md:text-xl font-light font-serif opacity-60 px-4">
+          <h1 className="text-6xl md:text-8xl font-light tracking-tighter font-serif leading-none">ORIN</h1>
+          <p className="text-accent font-mono text-[9px] md:text-xs uppercase tracking-[0.4em] md:tracking-[0.6em] font-bold">Your Personal AI Concierge</p>
+          <p className="text-text-secondary text-base md:text-xl font-light font-serif opacity-40 italic mt-4">
             Every space knows your song.
           </p>
         </div>
@@ -183,7 +183,7 @@ const LandingPage = ({ onConnect }: { onConnect: () => void }) => {
 
       <motion.div variants={itemVariants} className="w-full max-w-[280px] xs:max-w-sm space-y-6 mt-10 md:mt-12">
         <div className="flex flex-col items-center gap-4">
-          <div className="[&>button]:w-full [&>button]:justify-center [&>button]:h-12 md:[&>button]:h-14 [&>button]:rounded-xl md:[&>button]:rounded-2xl shadow-[0_0_30px_rgba(196,169,122,0.15)]">
+          <div className="[&>button]:w-full [&>button]:justify-center [&>button]:h-12 md:[&>button]:h-14 [&>button]:rounded-xl md:[&>button]:rounded-2xl">
             <WalletMultiButton />
           </div>
           <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest px-8">
@@ -192,15 +192,15 @@ const LandingPage = ({ onConnect }: { onConnect: () => void }) => {
         </div>
       </motion.div>
 
-      <motion.div variants={itemVariants} className="mt-12 md:mt-16 grid grid-cols-1 xs:grid-cols-3 gap-6 md:gap-8 w-full max-w-lg">
+      <motion.div variants={itemVariants} className="mt-16 md:mt-24 grid grid-cols-1 xs:grid-cols-3 gap-8 md:gap-12 w-full max-w-lg">
         {[
           { icon: Brain, label: "AI Agent" },
-          { icon: Fingerprint, label: "Identity" },
-          { icon: Shield, label: "Privacy" },
+          { icon: Fingerprint, label: "On-Chain Identity" },
+          { icon: Shield, label: "Privacy First" },
         ].map((item) => (
-          <div key={item.label} className="flex flex-col items-center gap-2 md:gap-3 opacity-40">
-            <item.icon className="w-[18px] h-[18px] md:w-5 md:h-5 text-accent" />
-            <span className="text-[9px] font-mono uppercase tracking-widest text-text-muted">{item.label}</span>
+          <div key={item.label} className="flex flex-col items-center gap-2 md:gap-3 opacity-25 hover:opacity-100 transition-opacity duration-500">
+            <item.icon className="w-[18px] h-[18px] md:w-5 md:h-5 text-text-primary" />
+            <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-text-muted">{item.label}</span>
           </div>
         ))}
       </motion.div>
@@ -378,7 +378,7 @@ const Dashboard = ({
   toggleTheme: () => void;
 }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("home");
-  const [target_temp_c, setTargetTempC] = useState(22);
+  const [temp, setTemp] = useState(22);
   const [brightness, setBrightness] = useState(60);
   const [lightingMode, setLightingMode] = useState<"warm" | "cold" | "ambient">("warm");
   const [musicOn, setMusicOn] = useState(true);
@@ -414,6 +414,11 @@ const Dashboard = ({
         const base64String = reader.result as string;
         setProfileImage(base64String);
         localStorage.setItem(`orin_profile_img_${walletAddress}`, base64String);
+        
+        if (guestPda) {
+          updateGuestAvatar(guestPda.toBase58(), base64String)
+            .catch(err => console.error("[ORIN] Failed to sync avatar to database:", err));
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -452,7 +457,7 @@ const Dashboard = ({
     const isRecentInteraction = Date.now() - lastInteractionRef.current < 3000;
 
     // 1. Handle Nested Device Status structure (RoomDeviceState)
-    if (state.nest?.target_temp_c !== undefined && !isRecentInteraction) setTargetTempC(Number(state.nest.target_temp_c));
+    if (state.nest?.temp !== undefined && !isRecentInteraction) setTemp(Number(state.nest.temp));
     if (state.nest?.mode !== undefined && !isRecentInteraction) setNestMode(state.nest.mode);
     
     if (state.hue?.brightness !== undefined && !isRecentInteraction) setBrightness(Number(state.hue.brightness));
@@ -462,7 +467,7 @@ const Dashboard = ({
     
     // 2. Handle Flat AI Response structure (OrinAgentOutput)
     // AI responses are triggered by user interaction, so we allow them through
-    if (state.temp !== undefined) setTargetTempC(Number(state.temp));
+    if (state.temp !== undefined) setTemp(Number(state.temp));
     if (state.brightness !== undefined) setBrightness(Number(state.brightness));
     if (state.lighting !== undefined) setLightingMode(state.lighting);
     if (state.musicOn !== undefined) setMusicOn(!!state.musicOn);
@@ -551,12 +556,12 @@ const Dashboard = ({
     setChatMessages((prev) => [...prev, { role: "orin", text: `I'll adjust that for you right away, ${guestName}. Processing your request...` }]);
 
     try {
-      // 1. Fire /voice-fast FIRST — get instant subtitle + audio
       const chatHistory = chatMessages.slice(-6).map(m => m.text);
       const currentPoints = profileData?.loyaltyPoints ?? profileData?.loyalty_points;
-      const initialPrefs = { target_temp_c, lighting: lightingMode, brightness, musicOn };
+      const initialPrefs = { temp, lighting: lightingMode, brightness, musicOn };
       
-      const fastResult = await fetchFastVoiceReply({
+      // 1. Fire /voice-fast FIRST — get instant subtitle + Cartesia audio (sonic-3)
+      fetchFastVoiceReply({
         userInput: text,
         guestContext: { 
           name: guestName, 
@@ -564,48 +569,46 @@ const Dashboard = ({
           history: chatHistory,
           currentPreferences: initialPrefs
         }
-      });
+      }).then(fastResult => {
+        if (fastResult.text) {
+          setChatMessages((prev) => {
+            const newMsgs = [...prev];
+            // Only update if the last message is still the loading indicator
+            if (newMsgs[newMsgs.length - 1].role === "orin" && newMsgs[newMsgs.length - 1].text.includes("Processing")) {
+              newMsgs[newMsgs.length - 1] = { role: "orin", text: fastResult.text! };
+            }
+            return newMsgs;
+          });
+        }
+        if (fastResult.audioBase64) {
+          playAudio(fastResult.audioBase64, fastResult.mimeType);
+        }
+      }).catch(err => console.warn("[ORIN] Fast Voice / ACK failed", err));
 
-      // 2. Instantly render the text subtitle from voice-fast
-      if (fastResult.text) {
-        setChatMessages((prev) => {
-          const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1] = { role: "orin", text: fastResult.text! };
-          return newMsgs;
-        });
-      }
-
-      // 3. Play audio (non-blocking)
-      if (fastResult.audioBase64) {
-        playAudio(fastResult.audioBase64, fastResult.mimeType);
-      }
-
-      // 3b. Sync UI state instantly if fast leg returned intent
-      let activePrefs = { ...initialPrefs, services: [], raw_response: "" };
-      if (fastResult.aiResult) {
-        syncUIState(fastResult.aiResult);
-        // Merge fast results into the payload for the heavy leg to prevent state overwrite
-        activePrefs = { ...activePrefs, ...fastResult.aiResult };
-      }
-
-      // 4. Only trigger the heavier /voice-command + Solana flow if fastIntent === true
-      if (fastResult.fastIntent && guestPda) {
+      let activePrefs: RoomPreferences = {
+        temp,
+        lighting: lightingMode,
+        brightness,
+        music: musicOn ? musicTrack : ""
+      };
+      
+      if (guestPda) {
         const provider = getProvider(wallet);
         const program = getProgram(provider, idl as any);
         
         const res = await saveVoicePreferences(
-        program,
-        guestPda,
-        wallet.publicKey!,
-        text,
-        activePrefs,
-        { 
-          name: guestName, 
-          loyaltyPoints: currentPoints?.toNumber?.() || Number(currentPoints) || 0, 
-          history: chatHistory,
-          currentPreferences: activePrefs
-        },
-        guestName,
+          program,
+          guestPda,
+          wallet.publicKey!,
+          text,
+          activePrefs,
+          { 
+            name: guestName, 
+            loyaltyPoints: currentPoints?.toNumber?.() || Number(currentPoints) || 0, 
+            history: chatHistory,
+            currentPreferences: activePrefs
+          },
+          guestName,
           (asyncText: string) => {
             setChatMessages((prev) => {
               const newMsgs = [...prev];
@@ -615,9 +618,27 @@ const Dashboard = ({
           }
         );
         
+        // Extract raw_response and fetch TTS
+        if (res.aiResult?.raw_response) {
+          fetchTtsAudio(res.aiResult.raw_response)
+            .then(ttsRes => playAudio(ttsRes.audioBase64, ttsRes.mimeType))
+            .catch(err => console.error("TTS fetch failed", err));
+        }
+
         // Update local React state from AI interpretation to keep UI in sync
         if (res.aiResult) {
           syncUIState(res.aiResult);
+          
+          // Chat UI Feedback format
+          const tempFormat = res.aiResult.temp !== undefined ? `Temp to ${res.aiResult.temp}°C` : "";
+          const lightFormat = res.aiResult.lighting ? `Lighting to ${res.aiResult.lighting}` : "";
+          const brightFormat = res.aiResult.brightness !== undefined ? `Brightness to ${res.aiResult.brightness}%` : "";
+          const musicFormat = res.aiResult.music ? `Music: ${res.aiResult.music}` : (res.aiResult.musicOn === false ? "Music: Off" : "");
+          
+          const changedParams = [tempFormat, lightFormat, brightFormat, musicFormat].filter(Boolean).join(", ");
+          if (changedParams) {
+             setChatMessages((prev) => [...prev, { role: "orin", text: `⚙️ ORIN adjusted: ${changedParams}` }]);
+          }
         }
 
         // Append signature silently to chat if it was required
@@ -651,17 +672,18 @@ const Dashboard = ({
       const provider = getProvider(wallet);
       const program = getProgram(provider, idl as any);
 
+      const manualPrefs = {
+        temp,
+        lighting: lightingMode,
+        brightness,
+        music: musicOn ? musicTrack : ""
+      };
+
       const res = await saveManualPreferences(
         program,
         guestPda,
         wallet.publicKey,
-        { target_temp_c, lighting: lightingMode, brightness, musicOn, services: [], raw_response: "" },
-        { 
-          name: guestName, 
-          loyaltyPoints: profileData?.loyaltyPoints?.toNumber?.() || Number(profileData?.loyaltyPoints) || 0, 
-          history: [],
-          currentPreferences: { target_temp_c, lighting: lightingMode, brightness, musicOn }
-        },
+        manualPrefs,
         guestName
       );
       const sigText = res.solanaTxSignature ? `\n\nTX Signature: ${res.solanaTxSignature.slice(0,12)}...` : ``;
@@ -860,7 +882,7 @@ const Dashboard = ({
         <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest mb-3">Environment</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { icon: Thermometer, label: "Climate", value: `${target_temp_c}°C · ${nestMode}`, color: "text-accent" },
+            { icon: Thermometer, label: "Climate", value: `${temp}°C · ${nestMode}`, color: "text-accent" },
             { icon: Lightbulb, label: "Lighting", value: lightingMode, color: "text-accent" },
             { icon: Music, label: "Ambient", value: musicOn ? "Playing" : "Off", color: "text-accent" },
             { icon: Shield, label: "Privacy", value: "Active", color: "text-emerald-500" },
@@ -1038,7 +1060,7 @@ const Dashboard = ({
             <Card
               key={scene.name}
               onClick={() => {
-                setTargetTempC(scene.temp);
+                setTemp(scene.temp);
                 setBrightness(scene.bright);
                 setLightingMode(scene.light);
               }}
@@ -1068,12 +1090,12 @@ const Dashboard = ({
                 <Thermometer size={18} />
                 <span className="font-bold text-sm md:text-base uppercase tracking-wider">Climate</span>
               </div>
-              <span className="text-xl md:text-2xl font-mono font-bold">{target_temp_c}°C</span>
+              <span className="text-xl md:text-2xl font-mono font-bold">{temp}°C</span>
             </div>
             <div className="pt-2 px-1">
               <input
-                type="range" min={16} max={30} step={0.5} value={target_temp_c}
-                onChange={(e) => setTargetTempC(parseFloat(e.target.value))}
+                type="range" min={16} max={30} step={0.5} value={temp}
+                onChange={(e) => setTemp(parseFloat(e.target.value))}
                 className="w-full accent-accent h-2 rounded-lg cursor-pointer bg-border appearance-none"
               />
             </div>
@@ -1453,6 +1475,15 @@ export default function App() {
       const program = getProgram(provider, idl as any);
       const profile = await fetchGuestProfile(program, pda);
       
+      try {
+        const apiProfile = await fetchGuestProfileApi(pda.toBase58());
+        if (apiProfile?.profile?.avatarUrl) {
+           localStorage.setItem(`orin_profile_img_${publicKey.toBase58()}`, apiProfile.profile.avatarUrl);
+        }
+      } catch (err) {
+        console.warn("[ORIN] Failed to fetch avatar from profile API:", err);
+      }
+      
       if (profile) {
         setProfileData(profile);
         if (profile.name && profile.name !== name) {
@@ -1527,10 +1558,6 @@ export default function App() {
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
       <div className="min-h-screen bg-background text-text-primary selection:bg-accent selection:text-text-primary relative overflow-hidden">
-        {/* Background Peripheral Glows — Pure Aesthetics */}
-        <div className="fixed -top-[20%] -right-[10%] w-[60%] h-[60%] bg-accent/5 blur-[120px] rounded-full pointer-events-none z-0" />
-        <div className="fixed -bottom-[10%] -left-[10%] w-[40%] h-[40%] bg-accent/10 blur-[100px] rounded-full pointer-events-none z-0" />
-
         <div className="relative z-10 flex flex-col min-h-screen">
           <AnimatePresence mode="wait">
           {view === "landing" && (
