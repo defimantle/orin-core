@@ -14,7 +14,7 @@ type VoiceRequest = {
 };
 
 type OrinPayload = {
-  target_temp_c: number;
+  temp: number;
   lighting: "warm" | "cold" | "ambient";
   services: string[];
   raw_response: string;
@@ -80,13 +80,15 @@ function parsePayloadFromText(text: string): OrinPayload {
   if (start < 0 || end <= start) throw new Error("Invalid JSON response from Groq");
   const parsed = JSON.parse(trimmed.slice(start, end + 1));
 
+  // Accept both canonical "temp" and legacy "target_temp_c" from LLM output
+  const rawTemp = parsed.temp ?? parsed.target_temp_c;
   const tempValue =
-    typeof parsed.target_temp_c === "number"
-      ? parsed.target_temp_c
-      : typeof parsed.target_temp_c === "string"
-      ? Number(parsed.target_temp_c.replace(",", "."))
+    typeof rawTemp === "number"
+      ? rawTemp
+      : typeof rawTemp === "string"
+      ? Number(rawTemp.replace(",", "."))
       : Number.NaN;
-  if (!Number.isFinite(tempValue)) throw new Error("Invalid target_temp_c");
+  if (!Number.isFinite(tempValue)) throw new Error("Invalid temp value");
 
   const lightingRaw = String(parsed.lighting ?? "").toLowerCase().trim();
   const lighting = (["warm", "cold", "ambient"].includes(lightingRaw) ? lightingRaw : "ambient") as
@@ -101,7 +103,7 @@ function parsePayloadFromText(text: string): OrinPayload {
   const rawResponse = clampWords(String(parsed.raw_response ?? "Understood. Your request is confirmed."), 15);
 
   return {
-    target_temp_c: tempValue,
+    temp: tempValue,
     lighting,
     services,
     raw_response: rawResponse,
@@ -153,7 +155,7 @@ async function askGroq(userInput: string, guestContext: GuestContext): Promise<O
     `History: ${guestContext.history.join(" | ")}`,
     `User command: ${userInput}`,
     "Return ONLY strict JSON with exact schema. Keep raw_response under 15 words:",
-    '{"target_temp_c":number,"lighting":"warm"|"cold"|"ambient","services":string[],"raw_response":string}',
+    '{"temp":number,"lighting":"warm"|"cold"|"ambient","services":string[],"raw_response":string}',
     "No markdown, no extra text.",
   ].join("\n");
 
@@ -215,7 +217,7 @@ export async function POST(req: NextRequest) {
       if (!fallback) throw error;
 
       payload = {
-        target_temp_c: 22,
+        temp: 22,
         lighting: "ambient",
         services: [],
         raw_response: fallback,

@@ -1060,6 +1060,7 @@ const Dashboard = ({
             <Card
               key={scene.name}
               onClick={() => {
+                setInteractionTimestamp();
                 setTemp(scene.temp);
                 setBrightness(scene.bright);
                 setLightingMode(scene.light);
@@ -1095,7 +1096,7 @@ const Dashboard = ({
             <div className="pt-2 px-1">
               <input
                 type="range" min={16} max={30} step={0.5} value={temp}
-                onChange={(e) => setTemp(parseFloat(e.target.value))}
+                onChange={(e) => { setInteractionTimestamp(); setTemp(parseFloat(e.target.value)); }}
                 className="w-full accent-accent h-2 rounded-lg cursor-pointer bg-border appearance-none"
               />
             </div>
@@ -1115,7 +1116,7 @@ const Dashboard = ({
             <div className="pt-2 px-1">
               <input
                 type="range" min={0} max={100} step={1} value={brightness}
-                onChange={(e) => setBrightness(parseInt(e.target.value))}
+                onChange={(e) => { setInteractionTimestamp(); setBrightness(parseInt(e.target.value)); }}
                 className="w-full accent-accent h-2 rounded-lg cursor-pointer bg-border appearance-none"
               />
             </div>
@@ -1132,7 +1133,7 @@ const Dashboard = ({
               <span className="font-bold text-base">Ambient Music</span>
             </div>
             <button
-              onClick={() => setMusicOn(!musicOn)}
+              onClick={() => { setInteractionTimestamp(); setMusicOn(!musicOn); }}
               className={cn(
                 "w-12 h-6 rounded-full relative transition-all duration-500",
                 musicOn ? "bg-accent" : "bg-card-hover border border-border"
