@@ -12,8 +12,8 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import dynamic from "next/dynamic";
 import {
   Brain,
   Fingerprint,
@@ -24,22 +24,17 @@ import {
   Music,
   Shield,
   Check,
-  MapPin,
-  Clock,
   Zap,
   Send,
   ChevronLeft,
-  Settings,
   User,
   Mic,
   MicOff,
   Wallet,
   Sparkles,
   Globe,
-  Star,
   ArrowRight,
   Volume2,
-  VolumeX,
   Moon,
   Sun,
   Coffee,
@@ -48,15 +43,26 @@ import {
   MessageSquare,
   Camera,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { Idl } from "@coral-xyz/anchor";
 import { cn } from "../lib/utils";
 
 // Wallet & Solana Hooks
 import { useWallet, useAnchorWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { transcribeAudio, fetchFastVoiceReply, fetchDeviceStatus, fetchTtsAudio, updateGuestAvatar, fetchGuestProfileApi } from "../lib/api";
+import { usePrivy } from "@privy-io/react-auth";
+import {
+  transcribeAudio,
+  fetchFastVoiceReply,
+  fetchDeviceStatus,
+  fetchTtsAudio,
+  updateGuestAvatar,
+  fetchGuestProfileApi,
+  type GuestProfileApiResponse,
+} from "../lib/api";
 import { saveManualPreferences, saveVoicePreferences, getRelayOpts, RoomPreferences } from "../lib/savePreferences";
 import { getProgram, getProvider, initializeGuestOnChain, fetchGuestProfile, getConnection } from "../lib/solana";
-import { deriveGuestPda, ORIN_PROGRAM_ID } from "../lib/pda";
+import { deriveGuestPda } from "../lib/pda";
 import idl from "../../idl/orin_identity.json";
 
 // --- Theme Context ---
@@ -67,16 +73,90 @@ const ThemeContext = React.createContext<{ theme: "dark" | "light"; toggleTheme:
 
 export const useTheme = () => React.useContext(ThemeContext);
 
-// Dynamic imports for wallet components (SSR-incompatible)
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((mod) => mod.WalletMultiButton),
-  { ssr: false }
+
+// Cartesia Startups Logo (Grant Compliance Requirement)
+const CartesiaLogo = () => (
+  <a href="https://cartesia.ai" target="_blank" rel="noopener noreferrer" className="text-text-muted opacity-60 hover:opacity-100 transition-opacity">
+    <div className="flex items-center gap-1.5">
+      <svg width="14" height="14" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="1" width="3" height="3" fill="currentColor"/>
+        <rect x="12" y="1" width="3" height="3" fill="currentColor"/>
+        <rect x="3" y="4" width="3" height="3" fill="currentColor"/>
+        <rect x="9" y="4" width="3" height="3" fill="currentColor"/>
+        <rect x="15" y="4" width="3" height="3" fill="currentColor"/>
+        <rect y="7" width="3" height="3" fill="currentColor"/>
+        <rect x="6" y="7" width="3" height="3" fill="currentColor"/>
+        <rect y="10" width="3" height="3" fill="currentColor"/>
+        <rect x="6" y="10" width="3" height="3" fill="currentColor"/>
+        <rect x="3" y="13" width="3" height="3" fill="currentColor"/>
+        <rect x="9" y="13" width="3" height="3" fill="currentColor"/>
+        <rect x="15" y="13" width="3" height="3" fill="currentColor"/>
+        <rect x="6" y="16" width="3" height="3" fill="currentColor"/>
+        <rect x="12" y="16" width="3" height="3" fill="currentColor"/>
+      </svg>
+      <span className="text-[8px] font-mono uppercase tracking-[0.2em]">Cartesia Startups</span>
+    </div>
+  </a>
 );
 
 // --- Types ---
 
 type View = "landing" | "onboarding" | "dashboard";
 type DashboardTab = "home" | "assistant" | "control" | "profile";
+type ChatRole = "user" | "orin";
+type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  text: string;
+};
+type CanonicalRoomState = {
+  temp?: number;
+  lighting?: "warm" | "cold" | "ambient";
+  brightness?: number;
+  music?: string;
+  musicOn?: boolean;
+  services?: string[];
+  nest?: {
+    temp?: number;
+    mode?: string;
+  };
+  hue?: {
+    color?: string;
+    brightness?: number;
+  };
+};
+
+type DashboardProfile = Partial<NonNullable<GuestProfileApiResponse["profile"]>> & {
+  loyaltyPoints?: number | { toNumber?: () => number; toString?: () => string };
+  loyalty_points?: number | { toNumber?: () => number; toString?: () => string };
+  stayCount?: number;
+  stay_count?: number;
+  isInitialized?: boolean;
+};
+
+type SolanaLinkedAccount = {
+  type: string;
+  chainType?: string;
+  address?: string;
+};
+
+const createChatMessage = (role: ChatRole, text: string, id?: string): ChatMessage => ({
+  id: id ?? `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  role,
+  text,
+});
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const getNumericValue = (
+  value: number | { toNumber?: () => number; toString?: () => string } | undefined
+): number => {
+  if (typeof value === "number") return value;
+  if (typeof value?.toNumber === "function") return value.toNumber();
+  const fallback = Number(value?.toString?.() ?? 0);
+  return Number.isFinite(fallback) ? fallback : 0;
+};
 
 // --- Logo ---
 
@@ -153,14 +233,16 @@ const StatusBadge = ({ active, label }: { active: boolean; label: string }) => {
 // LANDING PAGE — Wallet Connect
 // ============================================================
 
-const LandingPage = ({ onConnect }: { onConnect: () => void }) => {
+const LandingPage = () => {
+  const { login, ready } = usePrivy();
+  const easeCurve: [number, number, number, number] = [0.22, 1, 0.36, 1];
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.15, delayChildren: 0.2 } }
   };
   const itemVariants = {
     hidden: { opacity: 0, y: 30 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] as any } }
+    visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: easeCurve } }
   };
 
   return (
@@ -168,37 +250,43 @@ const LandingPage = ({ onConnect }: { onConnect: () => void }) => {
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="min-h-screen flex flex-col items-center justify-center p-6 md:p-12 max-w-2xl mx-auto text-center"
+      className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 max-w-2xl mx-auto text-center"
     >
       <motion.div variants={itemVariants} className="flex flex-col items-center space-y-6 md:space-y-8">
         <Logo className="w-24 h-24 md:w-32 md:h-32 mb-2" />
         <div className="space-y-3 md:space-y-4">
           <h1 className="text-6xl md:text-8xl font-light tracking-tighter font-serif leading-none">ORIN</h1>
           <p className="text-accent font-mono text-[9px] md:text-xs uppercase tracking-[0.4em] md:tracking-[0.6em] font-bold">Your Personal AI Concierge</p>
-          <p className="text-text-secondary text-base md:text-xl font-light font-serif opacity-40 italic mt-4">
+          <p className="text-text-secondary text-base md:text-xl font-light font-serif opacity-60 italic mt-4">
             Every space knows your song.
           </p>
         </div>
       </motion.div>
 
-      <motion.div variants={itemVariants} className="w-full max-w-[280px] xs:max-w-sm space-y-6 mt-10 md:mt-12">
+      <motion.div variants={itemVariants} className="w-full max-w-[280px] sm:max-w-sm space-y-6 mt-10 md:mt-12">
         <div className="flex flex-col items-center gap-4">
-          <div className="[&>button]:w-full [&>button]:justify-center [&>button]:h-12 md:[&>button]:h-14 [&>button]:rounded-xl md:[&>button]:rounded-2xl">
-            <WalletMultiButton />
-          </div>
+          {/* Privy Login — Sole Auth Method (Email, X, Wallet) */}
+          <button
+            onClick={login}
+            disabled={!ready}
+            className="w-full h-12 md:h-14 rounded-xl md:rounded-2xl bg-accent text-[#332F2E] font-bold text-sm hover:bg-accent-light transition-all accent-glow disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <Wallet size={16} />
+            {!ready ? "Loading..." : "Sign In to ORIN"}
+          </button>
           <p className="text-text-muted text-[10px] font-mono uppercase tracking-widest px-8">
-            Connect with Phantom or Coinbase
+            Email · X (Twitter) · Phantom · Solflare
           </p>
         </div>
       </motion.div>
 
-      <motion.div variants={itemVariants} className="mt-16 md:mt-24 grid grid-cols-1 xs:grid-cols-3 gap-8 md:gap-12 w-full max-w-lg">
+      <motion.div variants={itemVariants} className="mt-16 md:mt-24 grid grid-cols-1 sm:grid-cols-3 gap-8 md:gap-12 w-full max-w-2xl px-4">
         {[
           { icon: Brain, label: "AI Agent" },
           { icon: Fingerprint, label: "On-Chain Identity" },
           { icon: Shield, label: "Privacy First" },
         ].map((item) => (
-          <div key={item.label} className="flex flex-col items-center gap-2 md:gap-3 opacity-25 hover:opacity-100 transition-opacity duration-500">
+          <div key={item.label} className="flex flex-col items-center gap-2 md:gap-3 opacity-50 hover:opacity-100 transition-opacity duration-500">
             <item.icon className="w-[18px] h-[18px] md:w-5 md:h-5 text-text-primary" />
             <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-text-muted">{item.label}</span>
           </div>
@@ -255,7 +343,7 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="min-h-screen flex flex-col items-center justify-center p-6 xs:p-10 max-w-lg mx-auto relative overflow-hidden"
+      className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 max-w-lg mx-auto relative overflow-hidden"
     >
       {/* Back Button */}
       <button
@@ -265,7 +353,7 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
         <div className="w-10 h-10 rounded-full bg-card/50 border border-border flex items-center justify-center group-hover:border-accent/40 transition-all">
           <ChevronLeft size={18} />
         </div>
-        <span className="text-[10px] font-mono uppercase tracking-[0.2em] hidden xs:inline">Back</span>
+        <span className="text-[10px] font-mono uppercase tracking-[0.2em] hidden sm:inline">Back</span>
       </button>
 
       <AnimatePresence mode="wait">
@@ -300,7 +388,7 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
 
             <button
               onClick={() => setStep(step + 1)}
-              className="w-full xs:w-auto bg-accent text-[#332F2E] px-10 py-3.5 md:py-3 rounded-xl font-bold md:font-medium hover:bg-accent-light transition-all accent-glow text-sm"
+              className="w-full sm:w-auto bg-accent text-[#332F2E] px-10 py-3.5 md:py-3 rounded-xl font-bold md:font-medium hover:bg-accent-light transition-all accent-glow text-sm"
             >
               {step < 2 ? "Continue" : "Register Identity"} <ArrowRight size={14} className="inline ml-1" />
             </button>
@@ -358,8 +446,9 @@ const OnboardingFlow = ({ onComplete, onBack }: { onComplete: (name: string) => 
 
 const Dashboard = ({
   guestName,
-  guestEmail,
   walletAddress,
+  effectivePublicKey,
+  isPrivyAuthenticated,
   profileData,
   isProfileLoading,
   setProfileData,
@@ -368,11 +457,12 @@ const Dashboard = ({
   toggleTheme
 }: {
   guestName: string;
-  guestEmail: string;
   walletAddress: string;
-  profileData: any;
+  effectivePublicKey: PublicKey | null;
+  isPrivyAuthenticated: boolean;
+  profileData: DashboardProfile | null;
   isProfileLoading: boolean;
-  setProfileData: (data: any) => void;
+  setProfileData: (data: DashboardProfile | null) => void;
   onLogout: () => void;
   theme: "dark" | "light";
   toggleTheme: () => void;
@@ -385,22 +475,42 @@ const Dashboard = ({
   const [musicTrack, setMusicTrack] = useState("Midnight in Tokyo");
   const [isRecording, setIsRecording] = useState(false);
   const [nestMode, setNestMode] = useState("HEAT");
-  const [hueColor, setHueColor] = useState("#C4A97A");
+  const [, setHueColor] = useState("#C4A97A");
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
 
   // Anti-Flicker Guard: Prevents stale ground-truth from overwriting recent user changes
   const lastInteractionRef = useRef<number>(0);
   const setInteractionTimestamp = () => { lastInteractionRef.current = Date.now(); };
-  const [chatMessages, setChatMessages] = useState<Array<{role: "user" | "orin"; text: string}>>([
-    { role: "orin", text: `Welcome, ${guestName}. I'm ORIN, your personal AI concierge. How can I help you today?` },
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    createChatMessage("orin", `Welcome, ${guestName}. I'm ORIN, your personal AI concierge. How can I help you today?`, "welcome"),
   ]);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChatMessages([
+      createChatMessage("orin", `Welcome, ${guestName}. I'm ORIN, your personal AI concierge. How can I help you today?`, "welcome"),
+    ]);
+  }, [guestName]);
 
   // Load profile image from local storage on mount
   useEffect(() => {
     const savedImg = localStorage.getItem(`orin_profile_img_${walletAddress}`);
-    if (savedImg) setProfileImage(savedImg);
+    setProfileImage(savedImg || null);
   }, [walletAddress]);
+
+  const appendChatMessage = useCallback((role: ChatRole, text: string, id?: string) => {
+    const nextMessage = createChatMessage(role, text, id);
+    setChatMessages((prev) => [...prev, nextMessage]);
+    return nextMessage.id;
+  }, []);
+
+  const replaceChatMessage = useCallback((messageId: string, text: string) => {
+    setChatMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId ? { ...message, text } : message
+      )
+    );
+  }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -415,7 +525,7 @@ const Dashboard = ({
         setProfileImage(base64String);
         localStorage.setItem(`orin_profile_img_${walletAddress}`, base64String);
         
-        if (guestPda) {
+        if (isPrivyAuthenticated && effectivePublicKey && guestPda) {
           updateGuestAvatar(guestPda.toBase58(), base64String)
             .catch(err => console.error("[ORIN] Failed to sync avatar to database:", err));
         }
@@ -433,9 +543,9 @@ const Dashboard = ({
 
   // Memoized PDA Authority — ensures consistency across all syncs and listeners
   const guestPda = useMemo(() => {
-    if (!wallet.publicKey) return null;
-    return deriveGuestPda(guestName, wallet.publicKey).pda;
-  }, [guestName, wallet.publicKey]);
+    if (!effectivePublicKey || !guestName) return null;
+    return deriveGuestPda(guestName, effectivePublicKey).pda;
+  }, [guestName, effectivePublicKey]);
 
   const playAudio = async (base64: string, mimeType: string) => {
     try {
@@ -450,7 +560,7 @@ const Dashboard = ({
    * Consolidates all Dashboard UI updates from AI (flat) or Backend ground-truth (nested).
    * Ensures visual sliders always match the internal state logic exactly.
    */
-  const syncUIState = useCallback((state: any) => {
+  const syncUIState = useCallback((state: CanonicalRoomState) => {
     if (!state) return;
     
     // Pessimistic Guard: Skip ground-truth if user recently interacted (3s quiet period)
@@ -480,7 +590,7 @@ const Dashboard = ({
       setMusicTrack(state.music);
     }
     if (state.services && Array.isArray(state.services)) {
-      setActiveRequests(prev => [...new Set([...prev, ...state.services])]);
+      setActiveRequests(prev => [...new Set([...prev, ...(state.services ?? [])])]);
     }
   }, []);
 
@@ -518,15 +628,27 @@ const Dashboard = ({
 
   // On-chain state listener (WebSocket)
   useEffect(() => {
-    if (!profileData || !walletAddress || !guestPda) return;
+    // Audit: Use effectivePublicKey to ensure listeners start even if the adapter isn't connected yet (Handshake resilience)
+    if (!effectivePublicKey || !walletAddress || !guestPda) return;
     try {
       const conn = getConnection();
-      const subId = conn.onAccountChange(guestPda, async (accInfo) => {
+      const subId = conn.onAccountChange(guestPda, async () => {
         console.log("[ORIN] On-chain profile change detected. Re-syncing...");
-        const provider = getProvider(wallet);
-        const program = getProgram(provider, idl as any);
-        const profile = await fetchGuestProfile(program, guestPda);
-        if (profile) setProfileData(profile);
+        
+        if (wallet) {
+          const provider = getProvider(wallet);
+          const program = getProgram(provider, idl as Idl);
+          const profile = await fetchGuestProfile(program, guestPda);
+          if (profile) setProfileData(profile);
+        } else {
+          // Handshake Fallback: If heavy wallet isn't ready, use Public API for hydration
+          try {
+            const apiProfile = await fetchGuestProfileApi(guestPda.toBase58());
+            if (apiProfile?.profile) setProfileData(apiProfile.profile);
+          } catch (err) {
+            console.warn("[ORIN] WebSocket partial handshake: re-sync API fallback failed", err);
+          }
+        }
       }, "confirmed");
       return () => {
         conn.removeAccountChangeListener(subId);
@@ -534,29 +656,24 @@ const Dashboard = ({
     } catch (e) {
       console.warn("[ORIN] Failed to setup WebSocket listener", e);
     }
-  }, [profileData, walletAddress, guestPda, wallet, setProfileData]);
+  }, [guestPda, setProfileData, wallet, walletAddress, effectivePublicKey]);
 
-  const handleTextSend = () => {
-    if (!chatInput.trim()) return;
-    handleVoiceCommand(chatInput.trim());
-    setChatInput("");
-  };
-
-  const handleVoiceCommand = async (text: string) => {
-    if (!text.trim() || !wallet.publicKey) return;
+  const handleVoiceCommand = useCallback(async (text: string) => {
+    // We only require a valid Solana address (from Privy or Wallet Adapter) to move forward
+    if (!text.trim() || !effectivePublicKey) return;
     setIsProcessingVoice(true);
     
     setChatInput("");
-    // Push the text to UI instantly if it wasn't already pushed by the audio transcriber
-    setChatMessages((prev) => {
-        const lastMsg = prev[prev.length - 1];
-        if (lastMsg?.role === "user" && lastMsg.text === text) return prev; // Avoid dupes from Voice
-        return [...prev, { role: "user", text }];
-    });
-    setChatMessages((prev) => [...prev, { role: "orin", text: `I'll adjust that for you right away, ${guestName}. Processing your request...` }]);
+    const historySource = [...chatMessages];
+    const lastMsg = historySource[historySource.length - 1];
+    if (lastMsg?.role !== "user" || lastMsg.text !== text) {
+      appendChatMessage("user", text);
+      historySource.push(createChatMessage("user", text, "history-user"));
+    }
+    const processingMessageId = appendChatMessage("orin", `I'll adjust that for you right away, ${guestName}. Processing your request...`);
 
     try {
-      const chatHistory = chatMessages.slice(-6).map(m => m.text);
+      const chatHistory = historySource.slice(-6).map((message) => message.text);
       const currentPoints = profileData?.loyaltyPoints ?? profileData?.loyalty_points;
       const initialPrefs = { temp, lighting: lightingMode, brightness, musicOn };
       
@@ -565,56 +682,46 @@ const Dashboard = ({
         userInput: text,
         guestContext: { 
           name: guestName, 
-          loyaltyPoints: currentPoints?.toNumber?.() || Number(currentPoints) || 0, 
+          loyaltyPoints: getNumericValue(currentPoints),
           history: chatHistory,
           currentPreferences: initialPrefs
         }
       }).then(fastResult => {
         if (fastResult.text) {
-          setChatMessages((prev) => {
-            const newMsgs = [...prev];
-            // Only update if the last message is still the loading indicator
-            if (newMsgs[newMsgs.length - 1].role === "orin" && newMsgs[newMsgs.length - 1].text.includes("Processing")) {
-              newMsgs[newMsgs.length - 1] = { role: "orin", text: fastResult.text! };
-            }
-            return newMsgs;
-          });
+          replaceChatMessage(processingMessageId, fastResult.text);
         }
         if (fastResult.audioBase64) {
           playAudio(fastResult.audioBase64, fastResult.mimeType);
         }
       }).catch(err => console.warn("[ORIN] Fast Voice / ACK failed", err));
 
-      let activePrefs: RoomPreferences = {
-        temp,
-        lighting: lightingMode,
-        brightness,
-        music: musicOn ? musicTrack : ""
-      };
-      
-      if (guestPda) {
+      // 2. Heavy Block — Only proceed to blockchain sync if the wallet signer is ready
+      if (guestPda && wallet) {
+        const activePrefs: RoomPreferences = {
+          temp,
+          lighting: lightingMode,
+          brightness,
+          music: musicOn ? musicTrack : ""
+        };
+        
         const provider = getProvider(wallet);
-        const program = getProgram(provider, idl as any);
+        const program = getProgram(provider, idl as Idl);
         
         const res = await saveVoicePreferences(
           program,
           guestPda,
-          wallet.publicKey!,
+          effectivePublicKey,
           text,
           activePrefs,
           { 
             name: guestName, 
-            loyaltyPoints: currentPoints?.toNumber?.() || Number(currentPoints) || 0, 
+            loyaltyPoints: getNumericValue(currentPoints),
             history: chatHistory,
             currentPreferences: activePrefs
           },
           guestName,
           (asyncText: string) => {
-            setChatMessages((prev) => {
-              const newMsgs = [...prev];
-              newMsgs[newMsgs.length - 1] = { role: "orin", text: asyncText };
-              return newMsgs;
-            });
+            replaceChatMessage(processingMessageId, asyncText);
           }
         );
         
@@ -637,40 +744,57 @@ const Dashboard = ({
           
           const changedParams = [tempFormat, lightFormat, brightFormat, musicFormat].filter(Boolean).join(", ");
           if (changedParams) {
-             setChatMessages((prev) => [...prev, { role: "orin", text: `⚙️ ORIN adjusted: ${changedParams}` }]);
-          }
+             appendChatMessage("orin", `⚙️ ORIN adjusted: ${changedParams}`);
+           }
         }
 
         // Append signature silently to chat if it was required
         const sigStr = res.solanaTxSignature;
         if (sigStr) {
-          setChatMessages((prev) => {
-            const newMsgs = [...prev];
-            const currentText = newMsgs[newMsgs.length - 1].text;
-            newMsgs[newMsgs.length - 1] = { role: "orin", text: `${currentText} (Signature: ${sigStr.slice(0, 8)}...)` };
-            return newMsgs;
-          });
+          appendChatMessage("orin", `Signature confirmed: ${sigStr.slice(0, 8)}...`);
         }
+      } else {
+        console.warn("[ORIN] Wallet signer not ready. Skipping heavy on-chain sync.");
       }
-    } catch (e: any) {
-      setChatMessages((prev) => {
-        const newMsgs = [...prev];
-        newMsgs[newMsgs.length - 1] = { role: "orin", text: `API Error: ${e.message}` };
-        return newMsgs;
-      });
+    } catch (e: unknown) {
+      replaceChatMessage(processingMessageId, `API Error: ${getErrorMessage(e)}`);
     } finally {
       setIsProcessingVoice(false);
       refreshGroundTruth();
     }
+  }, [
+    appendChatMessage,
+    brightness,
+    chatMessages,
+    guestName,
+    guestPda,
+    lightingMode,
+    musicOn,
+    musicTrack,
+    profileData,
+    refreshGroundTruth,
+    replaceChatMessage,
+    syncUIState,
+    temp,
+    wallet,
+  ]);
+
+  const handleTextSend = () => {
+    if (!chatInput.trim()) return;
+    handleVoiceCommand(chatInput.trim());
+    setChatInput("");
   };
 
   const handleSaveSetup = async () => {
-    if (!wallet.publicKey || !guestPda) return;
+    if (!effectivePublicKey || !guestPda || !wallet) {
+      if (!wallet) alert("Wallet connection still initializing. Please wait a moment.");
+      return;
+    }
     setIsSaving(true);
     setInteractionTimestamp();
     try {
       const provider = getProvider(wallet);
-      const program = getProgram(provider, idl as any);
+      const program = getProgram(provider, idl as Idl);
 
       const manualPrefs = {
         temp,
@@ -682,14 +806,14 @@ const Dashboard = ({
       const res = await saveManualPreferences(
         program,
         guestPda,
-        wallet.publicKey,
+        effectivePublicKey,
         manualPrefs,
         guestName
       );
       const sigText = res.solanaTxSignature ? `\n\nTX Signature: ${res.solanaTxSignature.slice(0,12)}...` : ``;
       alert(`Success: Environment preferences synchronized.\n\nTransaction was subsidized by ORIN Relay (Gasless).${sigText}`);
-    } catch (e: any) {
-      alert(`Error saving setup: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Error saving setup: ${getErrorMessage(e)}`);
     } finally {
       setIsSaving(false);
       refreshGroundTruth();
@@ -697,17 +821,20 @@ const Dashboard = ({
   };
 
   const handleInitializeIdentity = async () => {
-    if (!wallet.publicKey) return;
+    if (!effectivePublicKey || !wallet) {
+       if (!wallet) alert("Wallet connection still initializing. Please wait a moment.");
+       return;
+    }
     setIsSaving(true);
     try {
-      const { pda, identifierHash } = deriveGuestPda(guestName, wallet.publicKey);
+      const { pda, identifierHash } = deriveGuestPda(guestName, effectivePublicKey);
       const provider = getProvider(wallet);
-      const program = getProgram(provider, idl as any);
+      const program = getProgram(provider, idl as Idl);
 
       const sig = await initializeGuestOnChain(
         program,
         pda,
-        wallet.publicKey,
+        effectivePublicKey,
         identifierHash,
         guestName,
         getRelayOpts()
@@ -715,8 +842,8 @@ const Dashboard = ({
       
       alert(`Identity Created: ${sig.slice(0, 10)}...`);
       setProfileData({ isInitialized: true, stayCount: 0, loyaltyPoints: 0 });
-    } catch (e: any) {
-      alert(`Error initializing identity: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Error initializing identity: ${getErrorMessage(e)}`);
     } finally {
       setIsSaving(false);
       refreshGroundTruth(); // Confirm backend/MQTT state is in sync after manual change
@@ -747,22 +874,19 @@ const Dashboard = ({
           const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           audioChunksRef.current = [];
           
-          setChatMessages((prev) => [...prev, { role: "user", text: "🎙️ (Audio recording)" }]);
+          const recordingMessageId = appendChatMessage("user", "🎙️ (Audio recording)");
           try {
             const text = await transcribeAudio(blob);
-            setChatMessages((prev) => {
-              const newMsgs = [...prev];
-              newMsgs[newMsgs.length - 1] = { role: "user", text };
-              return newMsgs;
-            });
+            replaceChatMessage(recordingMessageId, text);
             handleVoiceCommand(text);
-          } catch (e: any) {
-            setChatMessages((prev) => [...prev, { role: "orin", text: `Transcription failed: ${e.message}` }]);
+          } catch (e: unknown) {
+            replaceChatMessage(recordingMessageId, "🎙️ (Transcription failed)");
+            appendChatMessage("orin", `Transcription failed: ${getErrorMessage(e)}`);
           }
         };
         recorder.start();
         mediaRecorderRef.current = recorder;
-      }).catch(e => {
+      }).catch(() => {
           if (active) {
             alert('Microphone access denied or unavailable.');
             setIsRecording(false);
@@ -784,7 +908,7 @@ const Dashboard = ({
             mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
         }
     };
-  }, [isRecording]);
+  }, [appendChatMessage, handleVoiceCommand, isRecording, replaceChatMessage]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -966,7 +1090,7 @@ const Dashboard = ({
       <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar pb-6 px-1">
         {chatMessages.map((msg, i) => (
           <motion.div
-            key={i}
+            key={msg.id}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
@@ -997,6 +1121,11 @@ const Dashboard = ({
           </motion.div>
         )}
         <div ref={messagesEndRef} />
+        
+        {/* Compliance Logo in Chat Stream */}
+        <div className="flex justify-center py-4 opacity-50">
+          <CartesiaLogo />
+        </div>
       </div>
 
       {/* Input Area — Fixed at bottom of container */}
@@ -1060,6 +1189,7 @@ const Dashboard = ({
             <Card
               key={scene.name}
               onClick={() => {
+                setInteractionTimestamp();
                 setTemp(scene.temp);
                 setBrightness(scene.bright);
                 setLightingMode(scene.light);
@@ -1095,7 +1225,7 @@ const Dashboard = ({
             <div className="pt-2 px-1">
               <input
                 type="range" min={16} max={30} step={0.5} value={temp}
-                onChange={(e) => setTemp(parseFloat(e.target.value))}
+                onChange={(e) => { setInteractionTimestamp(); setTemp(parseFloat(e.target.value)); }}
                 className="w-full accent-accent h-2 rounded-lg cursor-pointer bg-border appearance-none"
               />
             </div>
@@ -1115,7 +1245,7 @@ const Dashboard = ({
             <div className="pt-2 px-1">
               <input
                 type="range" min={0} max={100} step={1} value={brightness}
-                onChange={(e) => setBrightness(parseInt(e.target.value))}
+                onChange={(e) => { setInteractionTimestamp(); setBrightness(parseInt(e.target.value)); }}
                 className="w-full accent-accent h-2 rounded-lg cursor-pointer bg-border appearance-none"
               />
             </div>
@@ -1132,7 +1262,7 @@ const Dashboard = ({
               <span className="font-bold text-base">Ambient Music</span>
             </div>
             <button
-              onClick={() => setMusicOn(!musicOn)}
+              onClick={() => { setInteractionTimestamp(); setMusicOn(!musicOn); }}
               className={cn(
                 "w-12 h-6 rounded-full relative transition-all duration-500",
                 musicOn ? "bg-accent" : "bg-card-hover border border-border"
@@ -1192,7 +1322,7 @@ const Dashboard = ({
           <div className="relative group">
             <div className="w-24 h-24 rounded-full bg-accent/10 border-2 border-accent/20 flex items-center justify-center text-accent text-4xl font-bold overflow-hidden">
               {profileImage ? (
-                <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                <Image src={profileImage} alt="Profile" fill className="object-cover" unoptimized />
               ) : (
                 guestName.charAt(0).toUpperCase()
               )}
@@ -1306,7 +1436,7 @@ const Dashboard = ({
     }
   };
 
-  const tabs: Array<{ id: DashboardTab; icon: any; label: string }> = [
+  const tabs: Array<{ id: DashboardTab; icon: LucideIcon; label: string }> = [
     { id: "home", icon: Home, label: "Home" },
     { id: "assistant", icon: MessageSquare, label: "ORIN" },
     { id: "control", icon: Zap, label: "Control" },
@@ -1314,33 +1444,27 @@ const Dashboard = ({
   ];
 
   return (
-    <div className="min-h-screen bg-background text-text-primary flex flex-col overflow-hidden">
-      {/* Top Bar — Refactored for Mobile */}
-      <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-border/50 flex-shrink-0 bg-background/80 backdrop-blur-md z-[60]">
+    <div className="flex-1 flex flex-col bg-background text-text-primary relative overflow-hidden">
+      {/* Top Bar — Fixed for absolute stability */}
+      <div className="fixed top-0 left-0 right-0 flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-border/50 bg-background/80 backdrop-blur-md z-[70]">
         <div className="flex items-center gap-2 md:gap-3">
           <Logo className="w-7 h-7 md:w-8 md:h-8" />
           <div className="flex flex-col">
             <span className="text-text-secondary text-[10px] md:text-sm font-bold uppercase tracking-wider leading-none">ORIN</span>
-            <span className="text-accent font-mono text-[8px] md:text-[9px] uppercase tracking-widest mt-0.5 animate-pulse truncate max-w-[80px] md:max-w-none">
-              {guestPda ? `ROOM_${guestPda.toBase58().slice(0, 4)}` : "ROOM_INIT"}
-            </span>
+            <span className="text-text-muted text-[8px] md:text-[10px] uppercase tracking-tighter">Your Smart Space</span>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2 md:gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-xl bg-card border border-border text-text-muted hover:text-accent hover:border-accent/30 transition-all flex items-center justify-center"
-            title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            className="p-2 rounded-xl bg-card border border-border text-text-muted hover:text-accent transition-colors"
+            title="Toggle Theme"
           >
             {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <div className="hidden xs:block">
-            <StatusBadge active={true} label="ORIN Active" />
-          </div>
           <button
             onClick={onLogout}
-            className="p-1.5 md:p-2 text-text-muted hover:text-text-primary transition-colors"
+            className="p-2 rounded-xl bg-card border border-border text-text-muted hover:text-red-400 transition-colors"
             title="Sign Out"
           >
             <LogOut size={18} />
@@ -1348,12 +1472,12 @@ const Dashboard = ({
         </div>
       </div>
 
-      {/* Main Content Area — Viewport Hardened */}
+      {/* Main Content Area — Viewport Hardened with top padding for fixed header */}
       <div className={cn(
         "flex-1 max-w-2xl mx-auto w-full no-scrollbar relative",
         activeTab === "assistant" 
-          ? "h-[calc(100dvh-120px)] md:h-[calc(100vh-160px)] overflow-hidden flex flex-col px-4 md:px-6" 
-          : "overflow-y-auto p-4 md:p-6 pb-32 md:pb-48"
+          ? "h-[calc(100dvh-120px)] md:h-[calc(100vh-160px)] overflow-hidden flex flex-col px-4 md:px-6 mt-[56px] md:mt-[73px]" 
+          : "overflow-y-auto p-4 md:p-6 pt-[72px] md:pt-[96px] pb-24 md:pb-32"
       )}>
         <AnimatePresence mode="wait">
           <motion.div
@@ -1361,11 +1485,25 @@ const Dashboard = ({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className={cn(activeTab === "assistant" && "flex-1 flex flex-col")}
+            className={cn(activeTab === "assistant" && "flex-1 flex flex-col", "min-h-full")}
           >
             {renderContent()}
+            
+            {/* Mobile/Tablet Inline Logo (Bottom of scroll) */}
+            {activeTab !== "assistant" && (
+              <div className="mt-12 mb-4 flex justify-center lg:hidden">
+                <CartesiaLogo />
+              </div>
+            )}
           </motion.div>
         </AnimatePresence>
+      </div>
+
+      {/* Desktop Fixed Corner Logo (Compliance without layout disruption) */}
+      <div className="fixed bottom-6 right-8 z-[100] hidden lg:block pointer-events-none">
+        <div className="pointer-events-auto opacity-60 hover:opacity-100 transition-opacity duration-500 bg-background/60 backdrop-blur-2xl p-3 rounded-2xl border border-border/60 shadow-lg shadow-accent/5">
+           <CartesiaLogo />
+        </div>
       </div>
 
       {/* Bottom Nav — Refined for Premium Mobile Feel */}
@@ -1405,16 +1543,56 @@ const Dashboard = ({
 export default function App() {
   const { connected, publicKey, disconnect } = useWallet();
   const wallet = useAnchorWallet();
+  const { user, logout: privyLogout, authenticated: privyAuthenticated } = usePrivy();
   const [view, setView] = useState<View>("landing");
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [guestName, setGuestName] = useState("");
-  const [guestEmail, setGuestEmail] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
-  const [profileData, setProfileData] = useState<any>(null);
+  const [profileData, setProfileData] = useState<DashboardProfile | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [hasAttemptedSync, setHasAttemptedSync] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  // Silence Privy-internal React Key Warnings (Silence 'xe' child warning)
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      const originalError = console.error;
+      if (typeof originalError !== 'function') return;
+
+      console.error = (...args: any[]) => {
+        const msg = String(args[0] || '');
+        if (
+          msg.includes('Each child in a list should have a unique "key" prop') &&
+          (msg.includes('xe') || String(args[2] || '').includes('xe'))
+        ) {
+          return;
+        }
+        originalError.apply(console, args);
+      };
+      return () => { console.error = originalError; };
+    }
+  }, []);
+
+  // Robust Solana Address Detection (Priority: Adapter > Privy User)
+  const derivedAddress = useMemo(() => {
+    if (publicKey) return publicKey.toBase58();
+    const linkedAccounts = (user?.linkedAccounts ?? []) as SolanaLinkedAccount[];
+    const solAccount = linkedAccounts.find(
+      (account) => (account.type === "wallet" && account.chainType === "solana") || account.type === "solana_wallet"
+    );
+    return solAccount?.address || "";
+  }, [publicKey, user]);
+
+  const effectivePublicKey = useMemo(() => {
+    if (publicKey) return publicKey;
+    if (derivedAddress) {
+      try { return new PublicKey(derivedAddress); } catch { return null; }
+    }
+    return null;
+  }, [publicKey, derivedAddress]);
+
+  const normalizedGuestName = useMemo(() => guestName.trim(), [guestName]);
 
   // Load theme from local storage as early as possible
   useEffect(() => {
@@ -1447,71 +1625,91 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Detect wallet connection → navigate to onboarding or dashboard
+  // Detect auth state → navigate to onboarding or dashboard
   useEffect(() => {
-    if (!isLoading && connected && publicKey && wallet) {
-      const addr = publicKey.toBase58();
-      setWalletAddress(addr);
+    // We proceed if we are NOT loading AND we have a valid Solana address (from either Privy or Adapter)
+    if (!isLoading && privyAuthenticated && derivedAddress) {
+      if (walletAddress !== derivedAddress) {
+        setWalletAddress(derivedAddress);
+      }
 
       // Check if returning user
       const savedName = localStorage.getItem("orin_guest_name");
       if (savedName) {
         setGuestName(savedName);
-        setView("dashboard");
+        if (view === "landing" || view === "onboarding") {
+           setView("dashboard");
+        }
       } else if (view === "landing") {
         setView("onboarding");
       }
     }
-  }, [isLoading, connected, publicKey, wallet]);
+  }, [isLoading, privyAuthenticated, derivedAddress, walletAddress, view]);
+
+  useEffect(() => {
+    if (!privyAuthenticated || !derivedAddress) {
+      setWalletAddress("");
+      setProfileData(null);
+      setHasAttemptedSync(false);
+    }
+  }, [derivedAddress, privyAuthenticated]);
 
   const syncProfile = useCallback(async (nameOverride?: string) => {
-    if (!connected || !publicKey || !wallet) return;
+    // Only block if we have NO address. We allow profile fetch even if wallet object isn't ready for signing yet.
+    if (!effectivePublicKey) return;
     
     setIsProfileLoading(true);
     try {
       const name = nameOverride || localStorage.getItem("orin_guest_name") || "";
-      const { pda } = deriveGuestPda(name, publicKey);
-      const provider = getProvider(wallet);
-      const program = getProgram(provider, idl as any);
-      const profile = await fetchGuestProfile(program, pda);
+      if (!name) {
+        setProfileData(null);
+        return;
+      }
+      const { pda } = deriveGuestPda(name, effectivePublicKey);
       
+      // If we have an Anchor wallet, we can perform full IDL-based program fetches
+      if (wallet) {
+        const provider = getProvider(wallet);
+        const program = getProgram(provider, idl as Idl);
+        const profile = await fetchGuestProfile(program, pda);
+        if (profile) setProfileData(profile);
+      }
+      
+      // Always try the public API fetch (doesn't require a signer)
       try {
         const apiProfile = await fetchGuestProfileApi(pda.toBase58());
         if (apiProfile?.profile?.avatarUrl) {
-           localStorage.setItem(`orin_profile_img_${publicKey.toBase58()}`, apiProfile.profile.avatarUrl);
+           localStorage.setItem(`orin_profile_img_${effectivePublicKey.toBase58()}`, apiProfile.profile.avatarUrl);
+        }
+        if (apiProfile?.profile && !profileData) {
+           // Fallback state if Anchor fetch is still pending
+           setProfileData(apiProfile.profile);
         }
       } catch (err) {
         console.warn("[ORIN] Failed to fetch avatar from profile API:", err);
-      }
-      
-      if (profile) {
-        setProfileData(profile);
-        if (profile.name && profile.name !== name) {
-          setGuestName(profile.name);
-          localStorage.setItem("orin_guest_name", profile.name);
-        }
       }
     } catch (e) {
       console.error("Profile sync failed", e);
     } finally {
       setIsProfileLoading(false);
     }
-  }, [connected, publicKey, wallet]);
+  }, [effectivePublicKey, wallet, profileData]);
 
   // Initial Sync — Fixed to avoid infinite RPC retries
   useEffect(() => {
-    if (connected && publicKey && wallet && !profileData && !isProfileLoading && !hasAttemptedSync) {
+    if (!isLoading && privyAuthenticated && effectivePublicKey && normalizedGuestName && !isProfileLoading && !hasAttemptedSync) {
       setHasAttemptedSync(true);
       syncProfile();
     }
-  }, [connected, publicKey, wallet, syncProfile, profileData, isProfileLoading, hasAttemptedSync]);
+  }, [effectivePublicKey, hasAttemptedSync, isLoading, isProfileLoading, normalizedGuestName, privyAuthenticated, syncProfile]);
 
   // Detect wallet disconnect → go back to landing
+  // Only kick back if BOTH are false to handle bridging delays
   useEffect(() => {
-    if (!isLoading && !connected && view !== "landing") {
+    if (!isLoading && !connected && !privyAuthenticated && view !== "landing") {
       setView("landing");
     }
-  }, [connected, isLoading]);
+  }, [connected, privyAuthenticated, isLoading, view]);
 
   const handleOnboardingComplete = (name: string) => {
     setGuestName(name);
@@ -1520,14 +1718,17 @@ export default function App() {
     syncProfile(name);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem("orin_guest_name");
     localStorage.removeItem("orin_guest_email");
     setGuestName("");
-    setGuestEmail("");
     setProfileData(null);
     setHasAttemptedSync(false);
     disconnect();
+    // Also sign out of Privy if authenticated
+    if (privyAuthenticated) {
+      try { await privyLogout(); } catch (e) { console.warn("[ORIN] Privy logout error:", e); }
+    }
     setView("landing");
   };
 
@@ -1561,21 +1762,28 @@ export default function App() {
         <div className="relative z-10 flex flex-col min-h-screen">
           <AnimatePresence mode="wait">
           {view === "landing" && (
-            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LandingPage onConnect={() => setView("onboarding")} />
+            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col">
+              <LandingPage />
+              <div className="pb-8 flex justify-center">
+                <CartesiaLogo />
+              </div>
             </motion.div>
           )}
           {view === "onboarding" && (
-            <motion.div key="onboarding" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div key="onboarding" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col">
               <OnboardingFlow onComplete={handleOnboardingComplete} onBack={() => { disconnect(); setView("landing"); }} />
+              <div className="pb-8 flex justify-center">
+                <CartesiaLogo />
+              </div>
             </motion.div>
           )}
           {view === "dashboard" && (
-            <motion.div key="dashboard" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
+            <motion.div key="dashboard" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="flex-1 flex flex-col">
               <Dashboard
                 guestName={guestName}
-                guestEmail={guestEmail}
                 walletAddress={walletAddress}
+                effectivePublicKey={effectivePublicKey}
+                isPrivyAuthenticated={privyAuthenticated}
                 profileData={profileData}
                 isProfileLoading={isProfileLoading}
                 setProfileData={setProfileData}
