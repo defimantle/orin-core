@@ -40,8 +40,8 @@ export default function PrivyClientProvider({ children }: Props) {
           walletList: ["phantom", "solflare", "backpack", "detected_solana_wallets"],
         },
         loginMethodsAndOrder: {
-          primary: ["email", "twitter", "phantom", "solflare", "backpack"],
-          overflow: ["detected_solana_wallets"],
+          primary: ["email", "twitter", "phantom", "solflare"],
+          overflow: ["backpack"],
         },
         embeddedWallets: {
           solana: {

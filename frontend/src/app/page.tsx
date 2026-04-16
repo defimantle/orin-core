@@ -49,8 +49,9 @@ import { cn } from "../lib/utils";
 
 // Wallet & Solana Hooks
 import { useWallet, useAnchorWallet } from "@solana/wallet-adapter-react";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { usePrivy } from "@privy-io/react-auth";
+import { useWallets as usePrivySolanaWallets, useSignTransaction as usePrivySignTransaction } from "@privy-io/react-auth/solana";
 import {
   transcribeAudio,
   fetchFastVoiceReply,
@@ -148,6 +149,27 @@ const createChatMessage = (role: ChatRole, text: string, id?: string): ChatMessa
 
 const getErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const renderTextWithLinks = (text: string): React.ReactNode[] => {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, index) => {
+    if (part.startsWith("http://") || part.startsWith("https://")) {
+      return (
+        <a
+          key={`link-${index}`}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline text-accent break-all"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <React.Fragment key={`text-${index}`}>{part}</React.Fragment>;
+  });
+};
 
 const getNumericValue = (
   value: number | { toNumber?: () => number; toString?: () => string } | undefined
@@ -512,11 +534,16 @@ const Dashboard = ({
     );
   }, []);
 
+  const notifyOrin = useCallback((text: string) => {
+    setActiveTab("assistant");
+    appendChatMessage("orin", text);
+  }, [appendChatMessage]);
+
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 1024 * 1024) { // 1MB limit for local storage reliability
-        alert("Image too large. Please select an image under 1MB.");
+        notifyOrin("Image too large. Please select an image under 1MB.");
         return;
       }
       const reader = new FileReader();
@@ -527,7 +554,7 @@ const Dashboard = ({
         
         if (isPrivyAuthenticated && effectivePublicKey && guestPda) {
           updateGuestAvatar(guestPda.toBase58(), base64String)
-            .catch(err => console.error("[ORIN] Failed to sync avatar to database:", err));
+            .catch(err => console.error(`[ORIN] Failed to sync avatar to database: ${getErrorMessage(err)}`));
         }
       };
       reader.readAsDataURL(file);
@@ -536,10 +563,57 @@ const Dashboard = ({
   const [chatInput, setChatInput] = useState("");
   const [activeRequests, setActiveRequests] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCheckoutPending, setIsCheckoutPending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wallet = useWallet();
+  const walletAdapter = useWallet();
+  const { wallets: privySolanaWallets } = usePrivySolanaWallets();
+  const { signTransaction: signPrivyTransaction } = usePrivySignTransaction();
+  const privySignerWallet = useMemo(() => {
+    if (!effectivePublicKey) return null;
+    const address = effectivePublicKey.toBase58().toLowerCase();
+    return (
+      privySolanaWallets.find((wallet) => wallet.address.toLowerCase() === address) ?? null
+    );
+  }, [effectivePublicKey, privySolanaWallets]);
+  const signerWallet = useMemo(() => {
+    if (walletAdapter.publicKey) {
+      const hasSignTx = typeof walletAdapter.signTransaction === "function";
+      const hasSignAllTx = typeof walletAdapter.signAllTransactions === "function";
+      if (hasSignTx || hasSignAllTx) {
+        return {
+          publicKey: walletAdapter.publicKey,
+          signTransaction: walletAdapter.signTransaction,
+          signAllTransactions: walletAdapter.signAllTransactions,
+        };
+      }
+    }
+
+    if (effectivePublicKey && privySignerWallet) {
+      return {
+        publicKey: effectivePublicKey,
+        signTransaction: async (tx: Transaction) => {
+          const signed = await signPrivyTransaction({
+            transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+            wallet: privySignerWallet,
+            chain: "solana:devnet",
+          });
+          return Transaction.from(signed.signedTransaction);
+        },
+      };
+    }
+
+    return null;
+  }, [
+    effectivePublicKey,
+    privySignerWallet,
+    signPrivyTransaction,
+    walletAdapter.publicKey,
+    walletAdapter.signAllTransactions,
+    walletAdapter.signTransaction,
+  ]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Memoized PDA Authority — ensures consistency across all syncs and listeners
   const guestPda = useMemo(() => {
@@ -549,10 +623,18 @@ const Dashboard = ({
 
   const playAudio = async (base64: string, mimeType: string) => {
     try {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      }
       const audio = new Audio("data:" + mimeType + ";base64," + base64);
+      currentAudioRef.current = audio;
+      audio.onended = () => {
+        if (currentAudioRef.current === audio) currentAudioRef.current = null;
+      };
       await audio.play();
     } catch (e) {
-      console.warn("[ORIN] Audio play blocked or failed. User interaction might be required.", e);
+      console.warn(`[ORIN] Audio play blocked or failed. User interaction might be required. ${getErrorMessage(e)}`);
     }
   };
 
@@ -603,7 +685,7 @@ const Dashboard = ({
       const status = await fetchDeviceStatus(guestPda.toBase58());
       syncUIState(status);
     } catch (e) {
-      console.warn("[ORIN] Failed to fetch ground truth device status", e);
+      console.warn(`[ORIN] Failed to fetch ground truth device status: ${getErrorMessage(e)}`);
     }
   }, [walletAddress, guestPda, syncUIState]);
 
@@ -617,7 +699,7 @@ const Dashboard = ({
             const welcome = await fetchTtsAudio(`Welcome to your private residence, ${guestName}. I am ORIN, your personal AI concierge. All systems are online.`);
             playAudio(welcome.audioBase64, welcome.mimeType);
         } catch (e) {
-            console.warn("[ORIN] Failed to play property welcome", e);
+            console.warn(`[ORIN] Failed to play property welcome: ${getErrorMessage(e)}`);
         }
     };
     playWelcome();
@@ -635,8 +717,8 @@ const Dashboard = ({
       const subId = conn.onAccountChange(guestPda, async () => {
         console.log("[ORIN] On-chain profile change detected. Re-syncing...");
         
-        if (wallet) {
-          const provider = getProvider(wallet);
+        if (signerWallet) {
+          const provider = getProvider(signerWallet);
           const program = getProgram(provider, idl as Idl);
           const profile = await fetchGuestProfile(program, guestPda);
           if (profile) setProfileData(profile);
@@ -646,7 +728,7 @@ const Dashboard = ({
             const apiProfile = await fetchGuestProfileApi(guestPda.toBase58());
             if (apiProfile?.profile) setProfileData(apiProfile.profile);
           } catch (err) {
-            console.warn("[ORIN] WebSocket partial handshake: re-sync API fallback failed", err);
+            console.warn(`[ORIN] WebSocket partial handshake: re-sync API fallback failed: ${getErrorMessage(err)}`);
           }
         }
       }, "confirmed");
@@ -654,9 +736,9 @@ const Dashboard = ({
         conn.removeAccountChangeListener(subId);
       };
     } catch (e) {
-      console.warn("[ORIN] Failed to setup WebSocket listener", e);
+      console.warn(`[ORIN] Failed to setup WebSocket listener: ${getErrorMessage(e)}`);
     }
-  }, [guestPda, setProfileData, wallet, walletAddress, effectivePublicKey]);
+  }, [effectivePublicKey, guestPda, setProfileData, signerWallet, walletAddress]);
 
   const handleVoiceCommand = useCallback(async (text: string) => {
     // We only require a valid Solana address (from Privy or Wallet Adapter) to move forward
@@ -678,7 +760,7 @@ const Dashboard = ({
       const initialPrefs = { temp, lighting: lightingMode, brightness, musicOn };
       
       // 1. Fire /voice-fast FIRST — get instant subtitle + Cartesia audio (sonic-3)
-      fetchFastVoiceReply({
+      const fastVoicePromise = fetchFastVoiceReply({
         userInput: text,
         guestContext: { 
           name: guestName, 
@@ -692,11 +774,16 @@ const Dashboard = ({
         }
         if (fastResult.audioBase64) {
           playAudio(fastResult.audioBase64, fastResult.mimeType);
+          return true;
         }
-      }).catch(err => console.warn("[ORIN] Fast Voice / ACK failed", err));
+        return false;
+      }).catch(err => {
+        console.warn(`[ORIN] Fast Voice / ACK failed: ${getErrorMessage(err)}`);
+        return false;
+      });
 
       // 2. Heavy Block — Only proceed to blockchain sync if the wallet signer is ready
-      if (guestPda && wallet) {
+      if (guestPda && signerWallet) {
         const activePrefs: RoomPreferences = {
           temp,
           lighting: lightingMode,
@@ -704,7 +791,7 @@ const Dashboard = ({
           music: musicOn ? musicTrack : ""
         };
         
-        const provider = getProvider(wallet);
+        const provider = getProvider(signerWallet);
         const program = getProgram(provider, idl as Idl);
         
         const res = await saveVoicePreferences(
@@ -725,11 +812,12 @@ const Dashboard = ({
           }
         );
         
-        // Extract raw_response and fetch TTS
-        if (res.aiResult?.raw_response) {
+        // Extract raw_response and fetch TTS only if fast-audio did not already play.
+        const fastAudioPlayed = await fastVoicePromise;
+        if (!fastAudioPlayed && res.aiResult?.raw_response) {
           fetchTtsAudio(res.aiResult.raw_response)
             .then(ttsRes => playAudio(ttsRes.audioBase64, ttsRes.mimeType))
-            .catch(err => console.error("TTS fetch failed", err));
+            .catch(err => console.error(`TTS fetch failed: ${getErrorMessage(err)}`));
         }
 
         // Update local React state from AI interpretation to keep UI in sync
@@ -777,7 +865,7 @@ const Dashboard = ({
     syncUIState,
     temp,
     effectivePublicKey,
-    wallet,
+    signerWallet,
   ]);
 
   const handleTextSend = () => {
@@ -787,14 +875,14 @@ const Dashboard = ({
   };
 
   const handleSaveSetup = async () => {
-    if (!effectivePublicKey || !guestPda || !wallet) {
-      if (!wallet) alert("Wallet connection still initializing. Please wait a moment.");
+    if (!effectivePublicKey || !guestPda || !signerWallet) {
+      if (!signerWallet) notifyOrin("Wallet signer is not ready yet. Please use Sign In to ORIN and reconnect.");
       return;
     }
     setIsSaving(true);
     setInteractionTimestamp();
     try {
-      const provider = getProvider(wallet);
+      const provider = getProvider(signerWallet);
       const program = getProgram(provider, idl as Idl);
 
       const manualPrefs = {
@@ -811,10 +899,13 @@ const Dashboard = ({
         manualPrefs,
         guestName
       );
-      const sigText = res.solanaTxSignature ? `\n\nTX Signature: ${res.solanaTxSignature.slice(0,12)}...` : ``;
-      alert(`Success: Environment preferences synchronized.\n\nTransaction was subsidized by ORIN Relay (Gasless).${sigText}`);
+      const sigText = res.solanaTxSignature ? ` TX Signature: ${res.solanaTxSignature.slice(0,12)}...` : "";
+      const explorerLink = res.solanaTxSignature
+        ? ` https://explorer.solana.com/tx/${res.solanaTxSignature}?cluster=devnet`
+        : "";
+      notifyOrin(`Environment preferences synchronized. Transaction was subsidized by ORIN Relay (Gasless).${sigText}${explorerLink}`);
     } catch (e: unknown) {
-      alert(`Error saving setup: ${getErrorMessage(e)}`);
+      notifyOrin(`Error saving setup: ${getErrorMessage(e)}`);
     } finally {
       setIsSaving(false);
       refreshGroundTruth();
@@ -822,14 +913,14 @@ const Dashboard = ({
   };
 
   const handleInitializeIdentity = async () => {
-    if (!effectivePublicKey || !wallet) {
-       if (!wallet) alert("Wallet connection still initializing. Please wait a moment.");
+    if (!effectivePublicKey || !signerWallet) {
+       if (!signerWallet) notifyOrin("Wallet signer is not ready yet. Please use Sign In to ORIN and reconnect.");
        return;
     }
     setIsSaving(true);
     try {
       const { pda, identifierHash } = deriveGuestPda(guestName, effectivePublicKey);
-      const provider = getProvider(wallet);
+      const provider = getProvider(signerWallet);
       const program = getProgram(provider, idl as Idl);
 
       const sig = await initializeGuestOnChain(
@@ -841,10 +932,10 @@ const Dashboard = ({
         getRelayOpts()
       );
       
-      alert(`Identity Created: ${sig.slice(0, 10)}...`);
+      notifyOrin(`Identity created: ${sig.slice(0, 10)}...`);
       setProfileData({ isInitialized: true, stayCount: 0, loyaltyPoints: 0 });
     } catch (e: unknown) {
-      alert(`Error initializing identity: ${getErrorMessage(e)}`);
+      notifyOrin(`Error initializing identity: ${getErrorMessage(e)}`);
     } finally {
       setIsSaving(false);
       refreshGroundTruth(); // Confirm backend/MQTT state is in sync after manual change
@@ -852,8 +943,18 @@ const Dashboard = ({
   };
 
   const handleCheckout = async () => {
-    alert("Checkout UI Active. Requesting endpoint from backend...");
-    // This will be wired up once the backend dev provides the endpoint.
+    if (isCheckoutPending) return;
+    setIsCheckoutPending(true);
+    try {
+      setActiveTab("assistant");
+      appendChatMessage(
+        "orin",
+        "Checkout noted. Your current frontend build does not have a settlement endpoint yet, so no rewards were redeemed yet."
+      );
+      await refreshGroundTruth();
+    } finally {
+      setIsCheckoutPending(false);
+    }
   };
 
   const startRecording = () => setIsRecording(true);
@@ -889,7 +990,7 @@ const Dashboard = ({
         mediaRecorderRef.current = recorder;
       }).catch(() => {
           if (active) {
-            alert('Microphone access denied or unavailable.');
+            notifyOrin("Microphone access denied or unavailable.");
             setIsRecording(false);
           }
       });
@@ -909,7 +1010,7 @@ const Dashboard = ({
             mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
         }
     };
-  }, [appendChatMessage, handleVoiceCommand, isRecording, replaceChatMessage]);
+  }, [appendChatMessage, handleVoiceCommand, isRecording, notifyOrin, replaceChatMessage]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1103,7 +1204,7 @@ const Dashboard = ({
                 ? "bg-card border border-border text-text-primary rounded-tl-none font-light leading-relaxed"
                 : "bg-accent text-[#332F2E] font-medium rounded-tr-none shadow-accent/10"
             )}>
-              <p className="text-sm md:text-base">{msg.text}</p>
+              <p className="text-sm md:text-base whitespace-pre-wrap">{renderTextWithLinks(msg.text)}</p>
             </div>
           </motion.div>
         ))}
@@ -1356,12 +1457,15 @@ const Dashboard = ({
           )}
           <p className="text-text-muted text-[10px] uppercase tracking-widest">
             {stayCount} activations · <span className="text-accent">{loyaltyPoints}</span> pts
-          </p>
-          <button
+          </p>          <button
             onClick={handleCheckout}
-            className="text-accent text-[10px] font-bold uppercase tracking-widest hover:underline mt-2"
+            disabled={isCheckoutPending}
+            className={cn(
+              "text-accent text-[10px] font-bold uppercase tracking-widest mt-2",
+              isCheckoutPending ? "opacity-60 cursor-not-allowed" : "hover:underline"
+            )}
           >
-            Finalize Stay & Redeem Rewards →
+            {isCheckoutPending ? "Preparing checkout..." : "Finalize Stay & Redeem Rewards ->"}
           </button>
         </Card>
       </motion.div>
@@ -1670,10 +1774,10 @@ export default function App() {
            setProfileData(apiProfile.profile);
         }
       } catch (err) {
-        console.warn("[ORIN] Failed to fetch avatar from profile API:", err);
+        console.warn(`[ORIN] Failed to fetch avatar from profile API: ${getErrorMessage(err)}`);
       }
     } catch (e) {
-      console.error("Profile sync failed", e);
+      console.error(`Profile sync failed: ${getErrorMessage(e)}`);
     } finally {
       setIsProfileLoading(false);
     }
@@ -1711,7 +1815,7 @@ export default function App() {
     disconnect();
     // Also sign out of Privy if authenticated
     if (privyAuthenticated) {
-      try { await privyLogout(); } catch (e) { console.warn("[ORIN] Privy logout error:", e); }
+      try { await privyLogout(); } catch (e) { console.warn(`[ORIN] Privy logout error: ${getErrorMessage(e)}`); }
     }
     setView("landing");
   };
@@ -1783,3 +1887,4 @@ export default function App() {
   </ThemeContext.Provider>
   );
 }
+
