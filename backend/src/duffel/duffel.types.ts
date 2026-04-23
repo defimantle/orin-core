@@ -344,3 +344,77 @@ export interface OrinBookingConfirmation {
   check_out_before_time: string;
   amenities: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Frontend Curated Booking Contract
+// ---------------------------------------------------------------------------
+// These types EXACTLY mirror frontend/src/lib/curatedBookingContract.ts.
+// The /api/v1/stays/curated-search endpoint returns CuratedStayResponse.
+// ---------------------------------------------------------------------------
+
+export interface CuratedStayOption {
+  hotelId: string;
+  hotelName: string;
+  location: string;
+  price: number;
+  currency: string;
+  tags: string[];
+  reasonForRecommendation: string;
+  pointsEarn: number;
+  nightlyDetails: {
+    nights: number;
+    ratePerNight: number;
+    totalBeforeTax: number;
+  };
+  cancellationPolicy: string;
+  image: string;
+}
+
+/** Always 2 or 3 options — matches frontend tuple type */
+export type CuratedStayOptions =
+  | [CuratedStayOption, CuratedStayOption]
+  | [CuratedStayOption, CuratedStayOption, CuratedStayOption];
+
+export interface CuratedStayResponse {
+  conversationSummary: string;
+  options: CuratedStayOptions;
+  rankingMetadata: {
+    rankedBy: "orin-ai";
+    confidenceScore: number;
+    generatedAt: string;
+  };
+  nextAction: string;
+}
+
+export interface BookingPriceLine {
+  label: string;
+  amount: number;
+  lineType: "base" | "tax" | "discount";
+}
+
+export interface PointsRedemption {
+  pointsUsed: number;
+  discountAmount: number;
+}
+
+export interface BookingSummary {
+  checkInDate: string;         // YYYY-MM-DD
+  checkOutDate: string;        // YYYY-MM-DD
+  guests: number;
+  selectedOption: CuratedStayOption;
+  priceLines: BookingPriceLine[];
+  pointsRedemption: PointsRedemption;
+  payableTotal: number;
+  currency: string;
+}
+
+/** Input shape for the curated search endpoint */
+export interface CuratedSearchRequest {
+  check_in_date: string;
+  check_out_date: string;
+  guests: number;
+  location?: { latitude: number; longitude: number; radius?: number };
+  accommodation?: { id: string };
+  conversation_summary?: string;   // Optional: what the user said to ORIN
+  loyalty_points?: number;         // For pointsEarn calculation
+}

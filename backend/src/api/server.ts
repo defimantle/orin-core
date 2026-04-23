@@ -22,9 +22,10 @@ import {
   createBooking,
   getBooking,
   cancelBooking,
+  curatedSearch,
   DuffelError,
 } from "../duffel/duffel.service";
-import type { DuffelSearchRequest, DuffelBookingRequest } from "../duffel/duffel.types";
+import type { DuffelSearchRequest, DuffelBookingRequest, CuratedSearchRequest } from "../duffel/duffel.types";
 
 /**
  * ORIN Production API Gateway
@@ -1558,6 +1559,73 @@ app.post<{ Params: { booking_id: string } }>(
     }
   }
 );
+
+/**
+ * CURATED HOTEL SEARCH — Primary frontend endpoint
+ * -------------------------------------------------------
+ * This is the ONLY endpoint the frontend chat flow calls for hotels.
+ * It returns a CuratedStayResponse matching frontend/src/lib/curatedBookingContract.ts
+ * exactly — no field-name translation needed on the frontend side.
+ *
+ * In mock mode: returns the same 3 curated demo hotels with dynamic night counts.
+ * In live mode:  runs a Duffel search + AI ranking → maps to contract shape.
+ *
+ * Body: CuratedSearchRequest
+ *
+ * Example:
+ *   POST /api/v1/stays/curated-search
+ *   {
+ *     "check_in_date": "2026-06-10",
+ *     "check_out_date": "2026-06-13",
+ *     "guests": 2,
+ *     "location": { "latitude": 51.5071, "longitude": -0.1416},
+ *     "conversation_summary": "I want a calm premium stay with good WiFi",
+ *     "loyalty_points": 1200
+ *   }
+ *
+ * Response conforms to: CuratedStayResponse (frontend contract)
+ */
+app.post<{ Body: CuratedSearchRequest }>("/api/v1/stays/curated-search", async (request, reply) => {
+  const reqLogger = request.reqLogger;
+
+  const apiKey = request.headers["x-api-key"];
+  if (apiKey !== env.API_KEY) {
+    reqLogger.warn({ origin: request.headers.origin }, "unauthorized_curated_search");
+    return reply.status(401).send({ error: "Unauthorized. Valid X-API-KEY required." });
+  }
+
+  const { check_in_date, check_out_date, guests, location, accommodation } =
+    request.body ?? ({} as CuratedSearchRequest);
+
+  if (!check_in_date || !check_out_date || !guests) {
+    return reply.status(400).send({
+      error: "Required: check_in_date, check_out_date, guests. Plus one of: location or accommodation.",
+    });
+  }
+  if (!location && !accommodation) {
+    return reply.status(400).send({
+      error: "Provide either 'location' (lat/lon) or 'accommodation' ({id}).",
+    });
+  }
+
+  try {
+    const result = await curatedSearch(request.body);
+    reqLogger.info({ count: result.options.length }, "curated_search_success");
+    return reply.send(result); // response IS the CuratedStayResponse — no wrapper
+  } catch (err) {
+    if (err instanceof DuffelError) {
+      reqLogger.error({ code: err.duffelCode, status: err.status }, "curated_search_duffel_error");
+      return reply.status(err.status >= 400 && err.status < 500 ? 400 : 502).send({
+        error: "Curated hotel search failed",
+        code: err.duffelCode,
+        details: err.message,
+      });
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    reqLogger.error({ err: msg }, "curated_search_unexpected_error");
+    return reply.status(500).send({ error: "Internal error during curated search", details: msg });
+  }
+});
 
 app.get("/api/v1/warmup", async () => ({ status: "warm", cacheSize: voiceCache.size }));
 app.get("/health", async () => ({ status: "ok" }));

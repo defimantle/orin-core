@@ -20,6 +20,10 @@ import type {
   OrinQuoteCard,
   OrinBookingConfirmation,
   DuffelBookingRequest,
+  CuratedStayOption,
+  CuratedStayOptions,
+  CuratedStayResponse,
+  CuratedSearchRequest,
 } from "./duffel.types";
 
 // ---------------------------------------------------------------------------
@@ -221,4 +225,107 @@ export async function mockCancelBooking(booking_id: string): Promise<{ booking_i
   if (!booking) throw new Error(`Mock: booking '${booking_id}' not found`);
   booking.status = "cancelled";
   return { booking_id, status: "cancelled" };
+}
+
+// ---------------------------------------------------------------------------
+// Mock Curated Search — returns the frontend contract shape directly
+// ---------------------------------------------------------------------------
+// Hotel data matches the demo cities used by the frontend mock,
+// with real Unsplash images. Dates + nights are calculated from request.
+// ---------------------------------------------------------------------------
+
+const MOCK_CURATED_OPTIONS: [CuratedStayOption, CuratedStayOption, CuratedStayOption] = [
+  {
+    hotelId: "stay_bellweather_001",
+    hotelName: "Hotel Bellweather",
+    location: "SoHo, New York",
+    price: 265,
+    currency: "USD",
+    tags: ["Premium", "King bed", "Quiet wing", "Work desk"],
+    reasonForRecommendation:
+      "Matches your preference for quiet premium spaces with warm ambience and fast check-in flow.",
+    pointsEarn: 320,
+    nightlyDetails: {
+      nights: 2,
+      ratePerNight: 265,
+      totalBeforeTax: 530,
+    },
+    cancellationPolicy: "Free cancellation up to 24h before check-in",
+    image:
+      "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    hotelId: "stay_grand_002",
+    hotelName: "The Grand Budapest",
+    location: "Upper East Side, New York",
+    price: 299,
+    currency: "USD",
+    tags: ["Luxury", "Neutral mood", "Business ready"],
+    reasonForRecommendation:
+      "Strong fit for your business-plus-comfort pattern with neutral lighting and reliable in-room workspace.",
+    pointsEarn: 370,
+    nightlyDetails: {
+      nights: 2,
+      ratePerNight: 299,
+      totalBeforeTax: 598,
+    },
+    cancellationPolicy: "Free cancellation up to 48h before check-in",
+    image:
+      "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    hotelId: "stay_nordic_003",
+    hotelName: "Nordic Atelier House",
+    location: "Tribeca, New York",
+    price: 238,
+    currency: "USD",
+    tags: ["Design", "Leisure", "Calm"],
+    reasonForRecommendation:
+      "Best value match for a calm trip with a design-forward setting and balanced room climate defaults.",
+    pointsEarn: 280,
+    nightlyDetails: {
+      nights: 2,
+      ratePerNight: 238,
+      totalBeforeTax: 476,
+    },
+    cancellationPolicy: "Free cancellation up to 24h before check-in",
+    image:
+      "https://images.unsplash.com/photo-1578774204375-826dc5d996ed?auto=format&fit=crop&w=1200&q=80",
+  },
+];
+
+export async function mockCuratedSearch(req: CuratedSearchRequest): Promise<CuratedStayResponse> {
+  await new Promise((r) => setTimeout(r, 150));
+
+  // Recalculate nights from request dates so nightlyDetails stays accurate
+  const msPerDay = 86_400_000;
+  const nights = Math.max(
+    1,
+    Math.round(
+      (new Date(req.check_out_date).getTime() - new Date(req.check_in_date).getTime()) / msPerDay
+    )
+  );
+
+  // Patch nightlyDetails with real night count from request
+  const options: CuratedStayOptions = MOCK_CURATED_OPTIONS.map((opt) => ({
+    ...opt,
+    nightlyDetails: {
+      nights,
+      ratePerNight: opt.price,
+      totalBeforeTax: parseFloat((opt.price * nights).toFixed(2)),
+    },
+  })) as CuratedStayOptions;
+
+  return {
+    conversationSummary:
+      req.conversation_summary ??
+      "You asked ORIN for a premium but calm stay with quick booking and reliable room comfort.",
+    options,
+    rankingMetadata: {
+      rankedBy: "orin-ai",
+      confidenceScore: 0.93,
+      generatedAt: new Date().toISOString(),
+    },
+    nextAction: "Select one stay and ORIN will prepare a booking summary.",
+  };
 }

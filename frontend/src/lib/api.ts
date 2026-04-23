@@ -341,3 +341,169 @@ export async function updateGuestAvatar(guestPda: string, avatarUrl: string): Pr
     throw new Error(`Avatar Update API error: ${response.status}`);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Duffel Stays — Curated Hotel Search
+// ─────────────────────────────────────────────────────────────────────────────
+// These types EXACTLY mirror backend/src/duffel/duffel.types.ts.
+// They are intentionally duplicated here to keep the frontend self-contained.
+// Source of truth for field names: backend CuratedSearchRequest / CuratedStayResponse.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CuratedSearchRequest {
+  check_in_date: string;        // YYYY-MM-DD
+  check_out_date: string;       // YYYY-MM-DD
+  guests: number;
+  location?: { latitude: number; longitude: number; radius?: number };
+  accommodation?: { id: string };
+  conversation_summary?: string;  // What the user said to ORIN
+  loyalty_points?: number;
+}
+
+export interface CuratedStayOption {
+  hotelId: string;
+  hotelName: string;
+  location: string;
+  price: number;
+  currency: string;
+  tags: string[];
+  reasonForRecommendation: string;
+  pointsEarn: number;
+  nightlyDetails: {
+    nights: number;
+    ratePerNight: number;
+    totalBeforeTax: number;
+  };
+  cancellationPolicy: string;
+  image: string;
+}
+
+export interface CuratedStayResponse {
+  conversationSummary: string;
+  options: [CuratedStayOption, CuratedStayOption] | [CuratedStayOption, CuratedStayOption, CuratedStayOption];
+  rankingMetadata: {
+    rankedBy: "orin-ai";
+    confidenceScore: number;
+    generatedAt: string;
+  };
+  nextAction: string;
+}
+
+export interface BookingPriceLine {
+  label: string;
+  amount: number;
+  lineType: "base" | "tax" | "discount";
+}
+
+export interface PointsRedemption {
+  pointsUsed: number;
+  discountAmount: number;
+}
+
+export interface BookingSummary {
+  checkInDate: string;
+  checkOutDate: string;
+  guests: number;
+  selectedOption: CuratedStayOption;
+  priceLines: BookingPriceLine[];
+  pointsRedemption: PointsRedemption;
+  payableTotal: number;
+  currency: string;
+}
+
+/**
+ * POST /api/v1/stays/curated-search
+ *
+ * The primary hotel search call for the chat-first frontend flow.
+ * Returns a CuratedStayResponse (2-3 AI-ranked hotel options) that
+ * exactly matches the shape defined in curatedBookingContract.ts.
+ *
+ * The response can be used directly in the UI without any transformation.
+ *
+ * @example
+ *   const stays = await fetchCuratedStays({
+ *     check_in_date: "2026-06-10",
+ *     check_out_date: "2026-06-13",
+ *     guests: 2,
+ *     location: { latitude: 40.7128, longitude: -74.006 },
+ *     conversation_summary: "I want a calm premium stay with good WiFi",
+ *     loyalty_points: guestContext.loyaltyPoints,
+ *   });
+ */
+export async function fetchCuratedStays(
+  params: CuratedSearchRequest
+): Promise<CuratedStayResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/stays/curated-search`, {
+    method: "POST",
+    headers: getApiHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Curated search API error (${response.status}): ${errorBody}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Builds a BookingSummary from a selected CuratedStayOption.
+ *
+ * This is a PURE CLIENT-SIDE function — no backend call needed.
+ * The backend manages the full /stays/quote + /stays/book flow;
+ * this function is only for building the confirmation preview UI.
+ *
+ * @param selectedOption   - The hotel the user picked
+ * @param checkInDate      - YYYY-MM-DD
+ * @param checkOutDate     - YYYY-MM-DD
+ * @param guests           - Number of guests
+ * @param loyaltyPoints    - Points the guest wants to redeem (0 = none)
+ */
+export function buildBookingSummary(
+  selectedOption: CuratedStayOption,
+  checkInDate: string,
+  checkOutDate: string,
+  guests: number,
+  loyaltyPoints = 0
+): BookingSummary {
+  const { totalBeforeTax, nights } = selectedOption.nightlyDetails;
+  const taxAmount = Math.round(totalBeforeTax * 0.1);
+  const maxDiscount = Math.round(totalBeforeTax * 0.08);
+  const discountAmount = Math.min(Math.floor(loyaltyPoints / 10), maxDiscount);
+
+  const pointsRedemption: PointsRedemption = {
+    pointsUsed: Math.min(loyaltyPoints, discountAmount * 10),
+    discountAmount,
+  };
+
+  const priceLines: BookingPriceLine[] = [
+    {
+      label: `Deluxe stay x ${nights} night(s)`,
+      amount: totalBeforeTax,
+      lineType: "base",
+    },
+    {
+      label: "Tax & fees (10%)",
+      amount: taxAmount,
+      lineType: "tax",
+    },
+    {
+      label: "ORIN points discount",
+      amount: -discountAmount,
+      lineType: "discount",
+    },
+  ];
+
+  return {
+    checkInDate,
+    checkOutDate,
+    guests,
+    selectedOption,
+    priceLines,
+    pointsRedemption,
+    payableTotal: totalBeforeTax + taxAmount - discountAmount,
+    currency: selectedOption.currency,
+  };
+}
+

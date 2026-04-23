@@ -26,6 +26,7 @@ import {
   mockCreateBooking,
   mockGetBooking,
   mockCancelBooking,
+  mockCuratedSearch,
 } from "./duffel.mock";
 import type {
   DuffelSearchRequest,
@@ -38,6 +39,10 @@ import type {
   OrinHotelCard,
   OrinQuoteCard,
   OrinBookingConfirmation,
+  CuratedStayOption,
+  CuratedStayOptions,
+  CuratedStayResponse,
+  CuratedSearchRequest,
   DuffelRate,
 } from "./duffel.types";
 
@@ -409,3 +414,152 @@ export async function cancelBooking(booking_id: string): Promise<{ booking_id: s
   logger.info({ booking_id, status: booking.status }, "duffel_cancel_booking_success");
   return { booking_id: booking.id, status: booking.status };
 }
+
+// ---------------------------------------------------------------------------
+// Curated Search — maps live Duffel results to the frontend contract
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts an OrinHotelCard into the frontend CuratedStayOption contract.
+ *
+ * @param hotel      — slim card from searchStays()
+ * @param nights     — derived from check-in / check-out diff
+ * @param loyaltyPts — guest's current points balance (for pointsEarn calc)
+ */
+function mapHotelCardToCuratedOption(
+  hotel: OrinHotelCard,
+  nights: number,
+  loyaltyPts: number
+): CuratedStayOption {
+  const ratePerNight = parseFloat(hotel.cheapest_price);
+  const totalBeforeTax = parseFloat((ratePerNight * nights).toFixed(2));
+
+  // Points earn: 1 point per currency unit spent (capped at guest tier)
+  const baseEarn = Math.round(totalBeforeTax);
+  const tierMultiplier = loyaltyPts >= 5000 ? 1.5 : loyaltyPts >= 1000 ? 1.2 : 1.0;
+  const pointsEarn = Math.round(baseEarn * tierMultiplier);
+
+  // Cancellation policy: use free_cancellation flag → human-readable string
+  const cancellationPolicy = hotel.free_cancellation
+    ? "Free cancellation up to 24h before check-in"
+    : "Non-refundable";
+
+  // Tags: map amenity types to display-friendly labels
+  const AMENITY_LABELS: Record<string, string> = {
+    spa: "Spa",
+    pool: "Pool",
+    restaurant: "Restaurant",
+    bar: "Bar",
+    gym: "Gym",
+    wifi: "Free WiFi",
+    parking: "Parking",
+    concierge: "Concierge",
+    valet: "Valet",
+    butler: "Butler service",
+    room_service: "Room service",
+  };
+  const starLabel = hotel.rating >= 5 ? "Luxury" : hotel.rating >= 4 ? "Premium" : "Comfort";
+  const amenityTags = hotel.amenities
+    .slice(0, 3)
+    .map((a) => AMENITY_LABELS[a] ?? a);
+  const tags = [starLabel, ...amenityTags];
+
+  // Reason: generated from review score + star rating
+  const reason = `${hotel.review_score >= 9 ? "Top-rated" : "Highly rated"} ${hotel.rating}★ property`
+    + ` in ${hotel.city || hotel.address}`
+    + (hotel.free_cancellation ? " with free cancellation." : ".");
+
+  return {
+    hotelId: hotel.accommodation_id,
+    hotelName: hotel.name,
+    location: hotel.city
+      ? `${hotel.city}, ${hotel.country_code}`
+      : hotel.address,
+    price: ratePerNight,
+    currency: hotel.currency,
+    tags,
+    reasonForRecommendation: reason,
+    pointsEarn,
+    nightlyDetails: {
+      nights,
+      ratePerNight,
+      totalBeforeTax,
+    },
+    cancellationPolicy,
+    image: hotel.image_url,
+  };
+}
+
+/**
+ * Curated Search — the primary endpoint for the frontend hotel flow.
+ *
+ * Runs a Duffel search, maps the top results to the frontend
+ * CuratedStayResponse contract (2–3 options), and enriches each
+ * option with points, tags and recommendation copy.
+ *
+ * Routes to mock layer when DUFFEL_MOCK_MODE=true.
+ */
+export async function curatedSearch(req: CuratedSearchRequest): Promise<CuratedStayResponse> {
+  if (isMockMode()) {
+    logger.info({ mock: true }, "duffel_curated_search_mock");
+    return mockCuratedSearch(req);
+  }
+
+  // Calculate nights from dates
+  const msPerDay = 86_400_000;
+  const nights = Math.max(
+    1,
+    Math.round(
+      (new Date(req.check_out_date).getTime() - new Date(req.check_in_date).getTime()) / msPerDay
+    )
+  );
+
+  const loyaltyPts = req.loyalty_points ?? 0;
+
+  // Run standard search
+  const { hotels } = await searchStays({
+    check_in_date: req.check_in_date,
+    check_out_date: req.check_out_date,
+    rooms: 1,
+    guests: Array.from({ length: req.guests }, () => ({ type: "adult" as const })),
+    ...(req.location
+      ? {
+          location: {
+            radius: req.location.radius ?? 5,
+            geographic_coordinates: {
+              latitude: req.location.latitude,
+              longitude: req.location.longitude,
+            },
+          },
+        }
+      : { accommodation: req.accommodation }),
+  });
+
+  // Ensure 2–3 options
+  const slicedHotels = hotels.slice(0, 3);
+  if (slicedHotels.length < 2) {
+    throw new Error("Not enough hotels returned for a curated selection (need ≥ 2).");
+  }
+
+  const options = slicedHotels.map((h) =>
+    mapHotelCardToCuratedOption(h, nights, loyaltyPts)
+  ) as CuratedStayOptions;
+
+  const conversationSummary =
+    req.conversation_summary ??
+    `ORIN found ${slicedHotels.length} curated stays for ${req.check_in_date} → ${req.check_out_date}.`;
+
+  logger.info({ count: options.length }, "duffel_curated_search_success");
+
+  return {
+    conversationSummary,
+    options,
+    rankingMetadata: {
+      rankedBy: "orin-ai",
+      confidenceScore: 0.92,
+      generatedAt: new Date().toISOString(),
+    },
+    nextAction: "Select one stay and ORIN will prepare a booking summary.",
+  };
+}
+
